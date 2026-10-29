@@ -1,0 +1,194 @@
+import ast
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+from manimlib.ai import generate_code, parse_image, parse_prompt
+from manimlib.code_checker import check_code, detect_scene_names
+from manimlib.gui.render_controller import RenderRequest, build_render_args
+
+
+class AIPluginTests(unittest.TestCase):
+    def test_parse_multiple_objects_and_bind_action_to_latest(self):
+        spec = parse_prompt("创建一个圆形和一个正方形，让正方形向右移动并旋转")
+        self.assertEqual([obj.type for obj in spec.objects], ["circle", "square"])
+        self.assertEqual(
+            [action.type for action in spec.actions],
+            ["create", "create", "move", "rotate"],
+        )
+        self.assertEqual(spec.actions[-1].target, "square_1")
+        self.assertEqual(spec.actions[-2].parameters["direction"], "RIGHT")
+
+    def test_generate_code_is_valid_and_uses_distinct_objects(self):
+        source = generate_code(parse_prompt("画一个圆形和一个三角形，让三角形向上移动"))
+        ast.parse(source)
+        self.assertIn("circle_1 = Circle()", source)
+        self.assertIn("triangle_1 = Triangle()", source)
+        self.assertIn("triangle_1.animate.shift(UP)", source)
+
+    def test_empty_and_unsupported_prompts_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, "不能为空"):
+            parse_prompt("   ")
+        with self.assertRaisesRegex(ValueError, "暂未识别"):
+            parse_prompt("绘制一条曲线")
+
+    def test_checker_accepts_generated_scene(self):
+        self.assertEqual(check_code(generate_code(parse_prompt("画一个圆形并旋转"))), [])
+
+    def test_checker_reports_syntax_and_missing_construct(self):
+        syntax = check_code("class Bad(Scene):\n  def construct(self)\n    pass")
+        self.assertEqual(syntax[0].rule, "python-syntax")
+        missing = check_code("class EmptyScene(Scene):\n    pass\n")
+        self.assertEqual(missing[0].rule, "construct-method")
+
+    def test_color_position_duration_and_explicit_target(self):
+        spec = parse_prompt(
+            "在左侧画一个红色圆形和右侧的蓝色正方形，让圆形向上移动持续2秒"
+        )
+        self.assertEqual(spec.objects[0].properties["color"], "RED")
+        self.assertEqual(spec.objects[0].properties["position"], "LEFT")
+        self.assertEqual(spec.objects[1].properties["color"], "BLUE")
+        self.assertEqual(spec.objects[1].properties["position"], "RIGHT")
+        self.assertEqual(spec.actions[-1].target, "circle_1")
+        self.assertEqual(spec.actions[-1].parameters["duration"], 2.0)
+
+        source = generate_code(spec)
+        self.assertIn("Circle().set_color(RED).move_to(LEFT)", source)
+        self.assertIn("Square().set_color(BLUE).move_to(RIGHT)", source)
+        self.assertIn("circle_1.animate.shift(UP), run_time=2", source)
+
+    def test_text_and_color_change(self):
+        source = generate_code(
+            parse_prompt('创建文字“你好 Manim”，让文字变为绿色持续1.5秒')
+        )
+        self.assertIn('Text("你好 Manim")', source)
+        self.assertIn("text_1.animate.set_color(GREEN), run_time=1.5", source)
+
+    def test_checker_reports_broad_except_and_unsafe_execution(self):
+        source = """from manimlib import *
+
+class UnsafeScene(Scene):
+    def construct(self):
+        try:
+            eval("1 + 1")
+        except Exception:
+            self.play()
+"""
+        diagnostics = check_code(source)
+        rules = {item.rule: item.severity for item in diagnostics}
+        self.assertEqual(rules["unsafe-dynamic-execution"], "error")
+        self.assertEqual(rules["empty-play"], "error")
+        self.assertEqual(rules["broad-except"], "warning")
+        self.assertTrue(all(item.suggestion for item in diagnostics))
+
+    def test_checker_reports_invalid_transform_and_none_operation(self):
+        source = """from manimlib import *
+
+class InvalidScene(Scene):
+    def construct(self):
+        self.play(Transform(Circle()))
+        value = None | "text"
+"""
+        diagnostics = check_code(source)
+        rules = {item.rule for item in diagnostics}
+        self.assertIn("transform-arguments", rules)
+        self.assertIn("none-binary-operation", rules)
+
+    def test_function_graph_generates_axes_and_safe_expression(self):
+        source = generate_code(parse_prompt("绘制函数 y=x^2 的图像"))
+        self.assertIn("axes_1 = Axes(", source)
+        self.assertIn(
+            "function_graph_1 = axes_1.get_graph(lambda x: x**2",
+            source,
+        )
+        ast.parse(source)
+
+    def test_common_math_function_is_namespaced(self):
+        source = generate_code(parse_prompt("绘制函数 y=sin(x) 的图像"))
+        self.assertIn("lambda x: np.sin(x)", source)
+
+    def test_unsafe_function_expression_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "Unsupported"):
+            generate_code(parse_prompt("绘制函数 y=__import__('os') 的图像"))
+
+    def test_render_request_builds_argument_list_without_shell(self):
+        with tempfile.TemporaryDirectory() as directory:
+            script = Path(directory, "scene file.py")
+            script.write_text("class DemoScene: pass", encoding="utf-8")
+            request = RenderRequest(
+                script=script,
+                scene="DemoScene",
+                python=Path(sys.executable),
+                extra_args=("-p", "--no-video"),
+            )
+            self.assertEqual(
+                request.command(),
+                [
+                    str(Path(sys.executable).resolve()),
+                    "-m",
+                    "manimlib",
+                    str(script.resolve()),
+                    "DemoScene",
+                    "-p",
+                    "--no-video",
+                ],
+            )
+
+    def test_render_request_rejects_invalid_scene_name(self):
+        with tempfile.TemporaryDirectory() as directory:
+            script = Path(directory, "scene.py")
+            script.write_text("", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "场景类名称无效"):
+                RenderRequest(script, "bad scene", Path(sys.executable))
+
+    def test_scene_detection_and_render_modes(self):
+        source = """from manimlib import *
+
+class FirstScene(Scene):
+    def construct(self):
+        pass
+
+class Helper:
+    pass
+
+class SecondScene(InteractiveScene):
+    def construct(self):
+        pass
+"""
+        self.assertEqual(
+            detect_scene_names(source),
+            ["FirstScene", "SecondScene"],
+        )
+        self.assertEqual(build_render_args("实时预览", "低清 480p"), [])
+        self.assertEqual(
+            build_render_args("保存最终帧", "中清 720p"),
+            ["-s", "-w", "-m"],
+        )
+        self.assertEqual(
+            build_render_args("导出视频", "高清 1080p"),
+            ["-w", "--hd"],
+        )
+
+    def test_image_parser_recognizes_colored_circle_and_square(self):
+        import cv2
+        import numpy as np
+
+        with tempfile.TemporaryDirectory() as directory:
+            image = np.full((300, 500, 3), 255, dtype=np.uint8)
+            cv2.circle(image, (110, 150), 55, (0, 0, 255), thickness=-1)
+            cv2.rectangle(image, (330, 95), (440, 205), (255, 0, 0), thickness=-1)
+            path = Path(directory, "shapes.png")
+            cv2.imwrite(str(path), image)
+
+            spec = parse_image(path)
+            self.assertEqual([obj.type for obj in spec.objects], ["circle", "square"])
+            self.assertEqual(spec.objects[0].properties["color"], "RED")
+            self.assertEqual(spec.objects[0].properties["position"], "LEFT")
+            self.assertEqual(spec.objects[1].properties["color"], "BLUE")
+            self.assertEqual(spec.objects[1].properties["position"], "RIGHT")
+            ast.parse(generate_code(spec))
+
+
+if __name__ == "__main__":
+    unittest.main()
