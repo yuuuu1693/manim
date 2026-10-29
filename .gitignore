@@ -159,3 +159,9 @@ latex_cache/
 
 # Textures the render comparison harness makes for itself
 tests/assets/
+
+# Local outputs and settings from the optional animation assistant
+/generated/
+/generated_scene.py
+/manim_gui_config.json
+/gui/
