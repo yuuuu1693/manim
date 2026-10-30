@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from manimlib.ai import generate_code, parse_image, parse_prompt
-from manimlib.code_checker import check_code, detect_scene_names
+from manimlib.code_checker import apply_safe_fixes, check_code, detect_scene_names
 from manimlib.gui.render_controller import RenderRequest, build_render_args
 
 
@@ -124,6 +124,38 @@ class ScopeScene(Scene):
     def test_checker_accepts_generated_function_graph_scope(self):
         source = generate_code(parse_prompt("绘制函数 y=sin(x) 的图像"))
         self.assertEqual(check_code(source), [])
+
+    def test_safe_fixes_correct_typo_and_empty_play(self):
+        source = """from manimlib import *
+
+class RepairScene(Scene):
+    def construct(self):
+        circle = Circle()
+        self.play(ShowCreation(circel))
+        self.play()
+"""
+        result = apply_safe_fixes(source)
+        self.assertIn("ShowCreation(circle)", result.source)
+        self.assertIn("        pass", result.source)
+        self.assertEqual(
+            {fix.rule for fix in result.applied},
+            {"undefined-variable", "empty-play"},
+        )
+        self.assertEqual(result.remaining, ())
+
+    def test_safe_fixes_leave_ambiguous_typo_for_manual_review(self):
+        source = """from manimlib import *
+
+class AmbiguousScene(Scene):
+    def construct(self):
+        circle_one = Circle()
+        circle_two = Circle()
+        self.add(circle_on)
+"""
+        result = apply_safe_fixes(source)
+        self.assertEqual(result.source, source)
+        self.assertFalse(result.applied)
+        self.assertEqual(result.remaining[0].rule, "undefined-variable")
 
     def test_function_graph_generates_axes_and_safe_expression(self):
         source = generate_code(parse_prompt("绘制函数 y=x^2 的图像"))

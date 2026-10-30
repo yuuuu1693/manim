@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from PySide6.QtCore import QProcess, QSettings, QTimer, QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QTextCursor
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from manimlib.ai import generate_code, parse_image, parse_prompt
-from manimlib.code_checker import check_code, detect_scene_names
+from manimlib.code_checker import apply_safe_fixes, check_code, detect_scene_names
 from manimlib.gui.log_panel import LogPanel
 from manimlib.gui.preview_widget import PreviewWidget
 from manimlib.gui.render_controller import build_render_args
@@ -29,7 +29,7 @@ from manimlib.gui.syntax_highlighter import PythonHighlighter
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, settings: QSettings | None = None):
         super().__init__()
         self.setWindowTitle("ManimGL 动画助手")
         self.resize(1100, 760)
@@ -41,7 +41,7 @@ class MainWindow(QMainWindow):
         self.render_process.started.connect(self._render_started)
         self.render_process.finished.connect(self._render_finished)
         self.render_process.errorOccurred.connect(self._render_error)
-        self.settings = QSettings("ManimGLAssistant", "DesktopGUI")
+        self.settings = settings or QSettings("ManimGLAssistant", "DesktopGUI")
         self.history: list[str] = []
         self._build_ui()
         self._restore_settings()
@@ -70,6 +70,8 @@ class MainWindow(QMainWindow):
         image_button.clicked.connect(self.generate_from_image)
         check_button = QPushButton("检查代码")
         check_button.clicked.connect(self.check_source)
+        fix_button = QPushButton("安全修复")
+        fix_button.clicked.connect(self.repair_source)
         open_button = QPushButton("打开代码")
         open_button.clicked.connect(self.open_source)
         export_button = QPushButton("导出源码")
@@ -82,6 +84,7 @@ class MainWindow(QMainWindow):
         buttons.addWidget(generate_button)
         buttons.addWidget(image_button)
         buttons.addWidget(check_button)
+        buttons.addWidget(fix_button)
         buttons.addWidget(open_button)
         buttons.addWidget(export_button)
         buttons.addWidget(self.render_button)
@@ -212,6 +215,24 @@ class MainWindow(QMainWindow):
             if item.suggestion:
                 self.log_panel.write(f"  建议：{item.suggestion}")
         return diagnostics
+
+    def repair_source(self) -> None:
+        result = apply_safe_fixes(self.source_edit.toPlainText())
+        if not result.applied:
+            self.log_panel.write("没有可安全自动修复的问题")
+            self.check_source()
+            return
+
+        cursor = self.source_edit.textCursor()
+        cursor.beginEditBlock()
+        cursor.select(QTextCursor.SelectionType.Document)
+        cursor.insertText(result.source)
+        cursor.endEditBlock()
+        self.source_edit.setTextCursor(cursor)
+        for fix in result.applied:
+            self.log_panel.write(f"[FIXED] 第 {fix.line} 行 {fix.rule}: {fix.message}")
+        self.log_panel.write("安全修复完成；可使用 Ctrl+Z 撤销")
+        self.check_source()
 
     def _refresh_scene_names(self, source: str) -> None:
         current = self.scene_combo.currentText()

@@ -9,6 +9,7 @@ on:
       - "generator/**"
       - "tests/test_ai_plugins.py"
       - "tests/test_config_import.py"
+      - "tests/test_gui_workflow.py"
       - "manimlib/config.py"
       - "setup.cfg"
       - ".github/workflows/plugin-tests.yml"
@@ -20,6 +21,7 @@ on:
       - "generator/**"
       - "tests/test_ai_plugins.py"
       - "tests/test_config_import.py"
+      - "tests/test_gui_workflow.py"
       - "manimlib/config.py"
       - "setup.cfg"
       - ".github/workflows/plugin-tests.yml"
@@ -28,6 +30,8 @@ jobs:
   test:
     runs-on: windows-latest
     timeout-minutes: 20
+    env:
+      QT_QPA_PLATFORM: offscreen
 
     steps:
       - uses: actions/checkout@v4

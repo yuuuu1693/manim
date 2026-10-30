@@ -13,6 +13,7 @@ class Diagnostic:
     line: int | None = None
     column: int | None = None
     suggestion: str | None = None
+    symbol: str | None = None
 
 
 def check_code(source: str) -> list[Diagnostic]:
@@ -266,6 +267,7 @@ def _check_function_scope(
                         loaded.lineno,
                         loaded.col_offset + 1,
                         f"在第 {loaded.lineno} 行之前为 {name} 赋值",
+                        name,
                     )
                 )
             continue
@@ -280,6 +282,7 @@ def _check_function_scope(
                 loaded.lineno,
                 loaded.col_offset + 1,
                 f"检查 {name} 是否拼写错误，或在使用前创建该变量",
+                name,
             )
         )
 

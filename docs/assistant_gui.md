@@ -30,6 +30,9 @@ animation, save a final PNG frame, or export an MP4 file.
 Static checks report syntax errors, unsafe dynamic execution, invalid animation
 calls, undefined variables, variables used before assignment, and unused
 parameters. Each diagnostic includes a repair suggestion in the GUI log.
+The **安全修复** action can correct a unique, high-confidence local-variable typo
+and replace an empty `self.play()` with `pass`; all edits remain undoable with
+Ctrl+Z. Ambiguous or semantic changes are deliberately left for manual review.
 
 ## Current limitations
 
