@@ -95,6 +95,36 @@ class InvalidScene(Scene):
         self.assertIn("transform-arguments", rules)
         self.assertIn("none-binary-operation", rules)
 
+    def test_checker_reports_scope_errors_and_unused_parameters(self):
+        source = """from manimlib import *
+
+class ScopeScene(Scene):
+    def helper(self, circle, duration):
+        return circle
+
+    def construct(self):
+        self.play(ShowCreation(circel))
+        count = count + 1
+        ready = 0
+        ready = ready + 1
+"""
+        diagnostics = check_code(source)
+        by_rule = {item.rule: item for item in diagnostics}
+        self.assertEqual(by_rule["undefined-variable"].message, "变量 circel 未定义")
+        self.assertEqual(
+            by_rule["used-before-assignment"].message,
+            "变量 count 在赋值前被使用",
+        )
+        self.assertEqual(by_rule["unused-parameter"].severity, "warning")
+        self.assertFalse(
+            any(item.rule == "used-before-assignment" and "ready" in item.message
+                for item in diagnostics)
+        )
+
+    def test_checker_accepts_generated_function_graph_scope(self):
+        source = generate_code(parse_prompt("绘制函数 y=sin(x) 的图像"))
+        self.assertEqual(check_code(source), [])
+
     def test_function_graph_generates_axes_and_safe_expression(self):
         source = generate_code(parse_prompt("绘制函数 y=x^2 的图像"))
         self.assertIn("axes_1 = Axes(", source)

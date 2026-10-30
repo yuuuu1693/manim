@@ -27,6 +27,10 @@ The application can generate and check source code, recognize basic geometric
 images, open or export Python scenes, select a Scene subclass, preview the
 animation, save a final PNG frame, or export an MP4 file.
 
+Static checks report syntax errors, unsafe dynamic execution, invalid animation
+calls, undefined variables, variables used before assignment, and unused
+parameters. Each diagnostic includes a repair suggestion in the GUI log.
+
 ## Current limitations
 
 - Natural-language parsing is deterministic and rule-based; it is not yet
@@ -39,4 +43,4 @@ animation, save a final PNG frame, or export an MP4 file.
 
 ## Tests
 
-    python -m unittest tests.test_ai_plugins -v
+    python -m unittest discover -s tests -p "test_*.py" -v
