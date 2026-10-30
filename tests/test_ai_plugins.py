@@ -131,6 +131,35 @@ class ModelScene(Scene):
         self.assertIn('Text("你好 Manim")', source)
         self.assertIn("text_1.animate.set_color(GREEN), run_time=1.5", source)
 
+    def test_extended_shape_templates_generate_valid_code(self):
+        source = generate_code(
+            parse_prompt("创建一个点、一条直线、一个箭头、一个长方形和一个椭圆")
+        )
+        self.assertIn("dot_1 = Dot()", source)
+        self.assertIn("line_1 = Line(LEFT, RIGHT)", source)
+        self.assertIn("arrow_1 = Arrow(LEFT, RIGHT)", source)
+        self.assertIn("rectangle_1 = Rectangle(width=3, height=2)", source)
+        self.assertIn("ellipse_1 = Ellipse(width=3, height=2)", source)
+        self.assertNotIn("circle_1", source)
+        self.assertNotIn("square_1", source)
+        self.assertEqual(check_code(source), [])
+
+    def test_diagonal_distance_fade_out_and_wait(self):
+        source = generate_code(
+            parse_prompt(
+                "创建一个蓝色圆点，让圆点向右上移动2个单位持续3秒然后淡出，等待2秒"
+            )
+        )
+        self.assertIn("Dot().set_color(BLUE)", source)
+        self.assertIn("dot_1.animate.shift(UR * 2), run_time=3", source)
+        self.assertIn("FadeOut(dot_1), run_time=3", source)
+        self.assertIn("self.wait(2)", source)
+
+    def test_fade_in_replaces_default_creation_animation(self):
+        source = generate_code(parse_prompt("让一个矩形淡入"))
+        self.assertIn("self.play(FadeIn(rectangle_1))", source)
+        self.assertNotIn("ShowCreation(rectangle_1)", source)
+
     def test_checker_reports_broad_except_and_unsafe_execution(self):
         source = """from manimlib import *
 

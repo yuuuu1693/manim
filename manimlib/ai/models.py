@@ -4,8 +4,29 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
-SUPPORTED_OBJECTS = {"circle", "square", "triangle", "text", "axes", "function_graph"}
-SUPPORTED_ACTIONS = {"create", "move", "rotate", "scale", "set_color", "wait"}
+SUPPORTED_OBJECTS = {
+    "arrow",
+    "axes",
+    "circle",
+    "dot",
+    "ellipse",
+    "function_graph",
+    "line",
+    "rectangle",
+    "square",
+    "text",
+    "triangle",
+}
+SUPPORTED_ACTIONS = {
+    "create",
+    "fade_in",
+    "fade_out",
+    "move",
+    "rotate",
+    "scale",
+    "set_color",
+    "wait",
+}
 
 
 @dataclass(frozen=True)

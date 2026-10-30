@@ -7,8 +7,17 @@ import re
 from manimlib.ai.models import SceneObject
 
 
-OBJECT_CONSTRUCTORS = {"circle": "Circle()", "square": "Square()", "triangle": "Triangle()"}
-ALLOWED_DIRECTIONS = {"RIGHT", "LEFT", "UP", "DOWN"}
+OBJECT_CONSTRUCTORS = {
+    "arrow": "Arrow(LEFT, RIGHT)",
+    "circle": "Circle()",
+    "dot": "Dot()",
+    "ellipse": "Ellipse(width=3, height=2)",
+    "line": "Line(LEFT, RIGHT)",
+    "rectangle": "Rectangle(width=3, height=2)",
+    "square": "Square()",
+    "triangle": "Triangle()",
+}
+ALLOWED_DIRECTIONS = {"RIGHT", "LEFT", "UP", "DOWN", "UR", "UL", "DR", "DL"}
 
 
 def render_object(obj: SceneObject) -> str:
@@ -47,11 +56,17 @@ def render_action(action_type: str, target: str | None, parameters: dict[str, ob
         raise ValueError(f"Action {action_type!r} requires a target")
     if action_type == "create":
         return _play(f"ShowCreation({target})", parameters)
+    if action_type == "fade_in":
+        return _play(f"FadeIn({target})", parameters)
+    if action_type == "fade_out":
+        return _play(f"FadeOut({target})", parameters)
     if action_type == "move":
         direction = str(parameters.get("direction", "RIGHT"))
         if direction not in ALLOWED_DIRECTIONS:
             raise ValueError(f"Unsupported direction: {direction!r}")
-        return _play(f"{target}.animate.shift({direction})", parameters)
+        distance = _positive_number(parameters.get("distance", 1), "distance")
+        vector = direction if distance == 1 else f"{direction} * {distance:g}"
+        return _play(f"{target}.animate.shift({vector})", parameters)
     if action_type == "rotate":
         return _play(f"Rotate({target})", parameters)
     if action_type == "scale":

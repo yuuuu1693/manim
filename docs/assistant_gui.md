@@ -38,6 +38,12 @@ Example prompts:
     在左侧画一个红色圆形，让圆形向右移动持续2秒
     绘制函数 y=sin(x) 的图像
     创建文字“Hello Manim”，让文字变为蓝色
+    创建一个蓝色圆点，让圆点向右上移动2个单位持续3秒然后淡出
+
+Offline templates support circles, squares, triangles, rectangles, ellipses,
+dots, lines, arrows, text, axes, and function graphs. Supported actions include
+creation, fade-in/out, movement in eight directions, rotation, scaling, color
+changes, and timed waits.
 
 The application can generate and check source code, recognize basic geometric
 images, open or export Python scenes, select a Scene subclass, preview the

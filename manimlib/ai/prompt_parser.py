@@ -6,11 +6,25 @@ from manimlib.ai.models import ActionSpec, SceneObject, SceneSpec
 
 
 OBJECT_PATTERNS = (
-    ("circle", re.compile(r"圆(?:形)?")),
-    ("square", re.compile(r"正方形|方形")),
+    ("ellipse", re.compile(r"椭圆(?:形)?")),
+    ("circle", re.compile(r"(?<!椭)圆(?!点)(?:形)?")),
+    ("rectangle", re.compile(r"长方形|矩形")),
+    ("square", re.compile(r"正方形|(?<!长)方形")),
     ("triangle", re.compile(r"三角形")),
+    ("arrow", re.compile(r"箭头")),
+    ("line", re.compile(r"直线|线段")),
+    ("dot", re.compile(r"圆点|点")),
 )
-DIRECTIONS = {"右": "RIGHT", "左": "LEFT", "上": "UP", "下": "DOWN"}
+DIRECTIONS = (
+    ("右上", "UR"),
+    ("左上", "UL"),
+    ("右下", "DR"),
+    ("左下", "DL"),
+    ("右", "RIGHT"),
+    ("左", "LEFT"),
+    ("上", "UP"),
+    ("下", "DOWN"),
+)
 COLORS = {
     "红": "RED",
     "蓝": "BLUE",
@@ -32,6 +46,10 @@ POSITIONS = {
     "下面": "DOWN",
     "中心": "ORIGIN",
     "中央": "ORIGIN",
+    "右上角": "UR",
+    "左上角": "UL",
+    "右下角": "DR",
+    "左下角": "DL",
 }
 
 
@@ -42,11 +60,11 @@ def parse_prompt(text: str) -> SceneSpec:
         raise ValueError("动画描述不能为空")
 
     parts = re.split(
-        r"让|然后|并(?:向|往|移动|平移|旋转|放大|缩放|变色)",
+        r"让|然后|并(?:向|往|移动|平移|旋转|放大|缩放|变色|淡入|淡出)",
         text,
         maxsplit=1,
     )
-    declaration_text = parts[0]
+    declaration_text = parts[0] or text
     action_text = parts[1] if len(parts) > 1 else text
     matches: list[tuple[int, str]] = []
     for object_type, pattern in OBJECT_PATTERNS:
@@ -97,17 +115,26 @@ def parse_prompt(text: str) -> SceneSpec:
             )
         )
     if not objects:
-        raise ValueError("暂未识别到支持的图形（圆形、正方形或三角形）")
+        raise ValueError(
+            "暂未识别到支持的图形（点、线、箭头、圆形、方形、三角形或椭圆）"
+        )
 
-    actions = [ActionSpec("create", obj.name) for obj in objects]
+    initial_action = "fade_in" if re.search(r"淡入|渐显", text) else "create"
+    actions = [ActionSpec(initial_action, obj.name) for obj in objects]
     target = _resolve_target(action_text, objects)
     duration = _parse_duration(action_text)
     if "移动" in text or "平移" in text:
         direction = next(
-            (value for key, value in DIRECTIONS.items() if key in action_text),
+            (value for key, value in DIRECTIONS if key in action_text),
             "RIGHT",
         )
         parameters: dict[str, object] = {"direction": direction}
+        distance_match = re.search(
+            r"(?:移动|平移)\s*(\d+(?:\.\d+)?)\s*(?:个)?单位",
+            action_text,
+        )
+        if distance_match:
+            parameters["distance"] = float(distance_match.group(1))
         if duration is not None:
             parameters["duration"] = duration
         actions.append(ActionSpec("move", target, parameters))
@@ -126,6 +153,14 @@ def parse_prompt(text: str) -> SceneSpec:
         if duration is not None:
             parameters["duration"] = duration
         actions.append(ActionSpec("set_color", target, parameters))
+    if re.search(r"淡出|消失", action_text):
+        parameters = {"duration": duration} if duration is not None else {}
+        actions.append(ActionSpec("fade_out", target, parameters))
+    wait_match = re.search(r"(?:等待|停留)\s*(\d+(?:\.\d+)?)\s*秒", text)
+    if wait_match:
+        actions.append(
+            ActionSpec("wait", parameters={"duration": float(wait_match.group(1))})
+        )
     return SceneSpec(tuple(objects), tuple(actions))
 
 
@@ -150,6 +185,11 @@ def _resolve_target(text: str, objects: list[SceneObject]) -> str:
             "circle": ("圆", "圆形"),
             "square": ("正方形", "方形"),
             "triangle": ("三角形",),
+            "rectangle": ("长方形", "矩形"),
+            "ellipse": ("椭圆", "椭圆形"),
+            "dot": ("圆点", "点"),
+            "line": ("直线", "线段"),
+            "arrow": ("箭头",),
             "text": ("文字", "文本"),
             "axes": ("坐标轴", "坐标系"),
             "function_graph": ("函数", "图像", "曲线"),
