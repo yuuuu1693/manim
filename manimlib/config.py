@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from typing import Optional
 
 
-def initialize_manim_config() -> Dict:
+def initialize_manim_config(argv: list[str] | None = None) -> Dict:
     """
     Return default configuration for various classes in manim, such as
     Scene, Window, Camera, and SceneFileWriter, as well as configuration
@@ -30,7 +30,7 @@ def initialize_manim_config() -> Dict:
     which can be further updated by a custom configuration file custom_config.yml.
     It is further updated based on command line argument.
     """
-    args = parse_cli()
+    args = parse_cli(argv)
     global_defaults_file = os.path.join(get_manim_dir(), "manimlib", "default_config.yml")
     config = Dict(merge_dicts_recursively(
         load_yaml(global_defaults_file),
@@ -51,7 +51,7 @@ def initialize_manim_config() -> Dict:
     return config
 
 
-def parse_cli():
+def parse_cli(argv: list[str] | None = None):
     try:
         parser = argparse.ArgumentParser()
         module_location = parser.add_mutually_exclusive_group()
@@ -224,7 +224,7 @@ def parse_cli():
             help="Automatically reload Python modules to pick up code changes " +
                  "across different files",
         )
-        args = parser.parse_args()
+        args = parser.parse_args(argv)
         args.write_file = any([args.write_file, args.open, args.finder])
         return args
     except argparse.ArgumentError as err:
@@ -395,5 +395,23 @@ def get_output_directory(args: Namespace, config: Dict) -> str:
     return out_dir
 
 
-# Create global configuration
-manim_config: Dict = initialize_manim_config()
+def _is_manim_cli_entrypoint() -> bool:
+    """Return whether this process was launched through the Manim CLI.
+
+    ``manimlib`` is also imported as a regular Python library by tests, IDEs and
+    the assistant GUI.  Parsing the host process' arguments during those imports
+    makes unrelated flags (for example ``unittest discover -s``) terminate the
+    process.  Only the actual ``manimgl``/``python -m manimlib`` entry points may
+    contribute command-line options to the global configuration.
+    """
+    entrypoint = Path(sys.argv[0]).resolve()
+    stem = entrypoint.stem.lower()
+    if stem in {"manimgl", "manimlib"}:
+        return True
+    return stem == "__main__" and entrypoint.parent.name.lower() == "manimlib"
+
+
+# Create global configuration. Regular library imports always use defaults.
+manim_config: Dict = initialize_manim_config(
+    None if _is_manim_cli_entrypoint() else []
+)
