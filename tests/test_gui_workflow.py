@@ -60,6 +60,52 @@ class DemoScene(Scene):
             window.source_edit.document().setModified(False)
             window.close()
 
+    def test_preview_widget_loads_rendered_image(self):
+        from PySide6.QtGui import QColor, QImage
+        from manimlib.gui.preview_widget import PreviewWidget
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory, "frame.png")
+            image = QImage(80, 60, QImage.Format.Format_RGB32)
+            image.fill(QColor("red"))
+            self.assertTrue(image.save(str(path)))
+            widget = PreviewWidget()
+            widget.resize(320, 240)
+            widget.load_media(path)
+            self.assertEqual(widget.current_path, path.resolve())
+            self.assertIsNotNone(widget.current_pixmap)
+            self.assertFalse(widget.play_button.isEnabled())
+            widget.close()
+
+    def test_preview_widget_plays_video_frames(self):
+        import cv2
+        import numpy as np
+        from manimlib.gui.preview_widget import PreviewWidget
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory, "preview.avi")
+            writer = cv2.VideoWriter(
+                str(path),
+                cv2.VideoWriter_fourcc(*"MJPG"),
+                10,
+                (64, 48),
+            )
+            if not writer.isOpened():
+                self.skipTest("OpenCV video writer is unavailable")
+            for value in (40, 120, 220):
+                writer.write(np.full((48, 64, 3), value, dtype=np.uint8))
+            writer.release()
+
+            widget = PreviewWidget()
+            widget.resize(320, 240)
+            widget.load_media(path)
+            self.assertTrue(widget.play_button.isEnabled())
+            self.assertTrue(widget.timer.isActive())
+            self.assertIsNotNone(widget.current_pixmap)
+            widget.toggle_playback()
+            self.assertFalse(widget.timer.isActive())
+            widget.close()
+
 
 if __name__ == "__main__":
     unittest.main()

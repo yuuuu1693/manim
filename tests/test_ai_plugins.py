@@ -15,7 +15,11 @@ from manimlib.ai import (
     parse_prompt,
 )
 from manimlib.code_checker import apply_safe_fixes, check_code, detect_scene_names
-from manimlib.gui.render_controller import RenderRequest, build_render_args
+from manimlib.gui.render_controller import (
+    RenderRequest,
+    build_render_args,
+    get_preview_output_path,
+)
 
 
 class AIPluginTests(unittest.TestCase):
@@ -292,6 +296,16 @@ class SecondScene(InteractiveScene):
         self.assertEqual(
             build_render_args("导出视频", "高清 1080p"),
             ["-w", "--hd"],
+        )
+        root = Path("preview-root")
+        self.assertIsNone(get_preview_output_path(root, "demo", "实时预览"))
+        self.assertEqual(
+            get_preview_output_path(root, "demo", "保存最终帧").name,
+            "demo.png",
+        )
+        self.assertEqual(
+            get_preview_output_path(root, "demo", "导出视频").name,
+            "demo.mp4",
         )
 
     def test_image_parser_recognizes_colored_circle_and_square(self):

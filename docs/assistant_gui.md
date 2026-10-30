@@ -41,7 +41,9 @@ Example prompts:
 
 The application can generate and check source code, recognize basic geometric
 images, open or export Python scenes, select a Scene subclass, preview the
-animation, save a final PNG frame, or export an MP4 file.
+animation, save a final PNG frame, or export an MP4 file. Saved PNG frames and
+MP4 videos are loaded into the embedded preview panel; videos include
+play/pause/replay controls.
 
 Static checks report syntax errors, unsafe dynamic execution, invalid animation
 calls, undefined variables, variables used before assignment, and unused
@@ -56,7 +58,8 @@ Ctrl+Z. Ambiguous or semantic changes are deliberately left for manual review.
   a separately configured OpenAI-compatible provider.
 - Image recognition is intended for clear, non-overlapping circles, squares,
   and triangles on a light background.
-- Preview is shown in ManimGL's external window rather than embedded in Qt.
+- Interactive real-time preview uses ManimGL's external GPU window; rendered
+  PNG and MP4 results are displayed inside Qt.
 - Static checks cover common unsafe and invalid patterns but are not a complete
   Python type checker.
 

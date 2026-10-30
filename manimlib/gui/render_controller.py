@@ -100,3 +100,21 @@ def build_render_args(mode: str, quality: str) -> list[str]:
     if mode == "导出视频":
         return ["-w", quality_flag]
     raise ValueError(f"未知渲染模式：{mode}")
+
+
+def get_preview_output_path(
+    project_root: str | Path,
+    file_name: str,
+    mode: str,
+) -> Path | None:
+    """Return the deterministic output path used by GUI renders."""
+    if not file_name or Path(file_name).name != file_name:
+        raise ValueError("预览输出名称无效")
+    if mode == "实时预览":
+        return None
+    suffixes = {"保存最终帧": ".png", "导出视频": ".mp4"}
+    try:
+        suffix = suffixes[mode]
+    except KeyError as exc:
+        raise ValueError(f"未知渲染模式：{mode}") from exc
+    return Path(project_root).resolve() / "videos" / f"{file_name}{suffix}"

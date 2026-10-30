@@ -25,7 +25,7 @@ from manimlib.code_checker import apply_safe_fixes, check_code, detect_scene_nam
 from manimlib.gui.generation_worker import GenerationWorker
 from manimlib.gui.log_panel import LogPanel
 from manimlib.gui.preview_widget import PreviewWidget
-from manimlib.gui.render_controller import build_render_args
+from manimlib.gui.render_controller import build_render_args, get_preview_output_path
 from manimlib.gui.syntax_highlighter import PythonHighlighter
 
 
@@ -45,6 +45,7 @@ class MainWindow(QMainWindow):
         self.settings = settings or QSettings("ManimGLAssistant", "DesktopGUI")
         self.history: list[str] = []
         self.generation_worker: GenerationWorker | None = None
+        self.pending_preview_path: Path | None = None
         self._build_ui()
         self._restore_settings()
 
@@ -125,7 +126,8 @@ class MainWindow(QMainWindow):
         self.highlighter = PythonHighlighter(self.source_edit.document())
         self.source_edit.document().modificationChanged.connect(self._update_title)
         splitter.addWidget(self.source_edit)
-        splitter.addWidget(PreviewWidget())
+        self.preview_widget = PreviewWidget()
+        splitter.addWidget(self.preview_widget)
         splitter.setSizes([700, 400])
         layout.addWidget(splitter, 1)
 
@@ -311,7 +313,24 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "渲染设置", str(exc))
             return
         self.log_panel.write(f"正在启动 ManimGL：{mode}，{quality}")
+        output_name = f"gui_{scene_name}"
+        self.pending_preview_path = get_preview_output_path(
+            self.project_root,
+            output_name,
+            mode,
+        )
+        if self.pending_preview_path is None:
+            self.preview_widget.show_message(
+                "实时预览将在 ManimGL 独立窗口中显示\n"
+                "选择“保存最终帧”或“导出视频”可在此处查看结果"
+            )
+        else:
+            self.preview_widget.show_message("正在渲染，完成后将自动加载预览…")
         self.render_process.setWorkingDirectory(str(self.project_root))
+        output_args = [] if self.pending_preview_path is None else [
+            "--file_name",
+            output_name,
+        ]
         self.render_process.start(
             sys.executable,
             [
@@ -320,6 +339,7 @@ class MainWindow(QMainWindow):
                 str(self.generated_file),
                 scene_name,
                 *render_args,
+                *output_args,
             ],
         )
 
@@ -359,8 +379,24 @@ class MainWindow(QMainWindow):
         self.stop_button.setEnabled(False)
         if exit_code == 0:
             self.log_panel.write("预览运行完成")
+            self._load_rendered_preview()
         else:
+            self.pending_preview_path = None
             self.log_panel.write(f"渲染进程退出，代码：{exit_code}")
+            self.preview_widget.show_message("渲染失败，请查看下方日志")
+
+    def _load_rendered_preview(self) -> None:
+        path = self.pending_preview_path
+        self.pending_preview_path = None
+        if path is None:
+            return
+        try:
+            self.preview_widget.load_media(path)
+        except ValueError as exc:
+            self.log_panel.write(f"[WARNING] {exc}")
+            self.preview_widget.show_message("渲染已完成，但无法加载内嵌预览")
+            return
+        self.log_panel.write(f"已加载内嵌预览：{path}")
 
     def _render_error(self, error) -> None:
         self.log_panel.write(f"渲染进程错误：{error}")

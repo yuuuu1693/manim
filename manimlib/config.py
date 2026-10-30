@@ -395,7 +395,10 @@ def get_output_directory(args: Namespace, config: Dict) -> str:
     return out_dir
 
 
-def _is_manim_cli_entrypoint() -> bool:
+def _is_manim_cli_entrypoint(
+    argv0: str | None = None,
+    original_argv: list[str] | None = None,
+) -> bool:
     """Return whether this process was launched through the Manim CLI.
 
     ``manimlib`` is also imported as a regular Python library by tests, IDEs and
@@ -404,7 +407,12 @@ def _is_manim_cli_entrypoint() -> bool:
     process.  Only the actual ``manimgl``/``python -m manimlib`` entry points may
     contribute command-line options to the global configuration.
     """
-    entrypoint = Path(sys.argv[0]).resolve()
+    original = getattr(sys, "orig_argv", []) if original_argv is None else original_argv
+    for index, argument in enumerate(original[:-1]):
+        if argument == "-m" and original[index + 1] in {"manimlib", "manimlib.__main__"}:
+            return True
+
+    entrypoint = Path(argv0 if argv0 is not None else sys.argv[0]).resolve()
     stem = entrypoint.stem.lower()
     if stem in {"manimgl", "manimlib"}:
         return True
