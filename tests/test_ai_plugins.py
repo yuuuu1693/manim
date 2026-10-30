@@ -1,15 +1,77 @@
 import ast
+import json
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-from manimlib.ai import generate_code, parse_image, parse_prompt
+from manimlib.ai import (
+    OpenAICompatibleProvider,
+    ProviderConfig,
+    ProviderError,
+    generate_code,
+    generate_scene_source,
+    parse_image,
+    parse_prompt,
+)
 from manimlib.code_checker import apply_safe_fixes, check_code, detect_scene_names
 from manimlib.gui.render_controller import RenderRequest, build_render_args
 
 
 class AIPluginTests(unittest.TestCase):
+    def test_provider_parses_openai_compatible_response(self):
+        captured = {}
+
+        def transport(request, timeout):
+            captured["url"] = request.full_url
+            captured["authorization"] = request.headers["Authorization"]
+            captured["payload"] = request.data.decode("utf-8")
+            captured["timeout"] = timeout
+            source = """from manimlib import *
+
+class ModelScene(Scene):
+    def construct(self):
+        self.add(Circle())
+        self.wait(1)
+"""
+            return json.dumps(
+                {"choices": [{"message": {"content": f"```python\n{source}```"}}]}
+            ).encode("utf-8")
+
+        provider = OpenAICompatibleProvider(
+            ProviderConfig("https://example.test/v1", "demo-model", "secret", 3),
+            transport=transport,
+        )
+        result = generate_scene_source("画一个圆", mode="provider", provider=provider)
+        self.assertEqual(result.backend, "provider")
+        self.assertIn("class ModelScene(Scene)", result.source)
+        self.assertEqual(captured["url"], "https://example.test/v1/chat/completions")
+        self.assertEqual(captured["authorization"], "Bearer secret")
+        self.assertEqual(captured["timeout"], 3)
+        self.assertIn('"model": "demo-model"', captured["payload"])
+
+    def test_invalid_provider_code_falls_back_to_local_rules(self):
+        class UnsafeProvider:
+            def generate(self, _prompt):
+                return "from manimlib import *\nimport os\nos.system('whoami')"
+
+        result = generate_scene_source(
+            "画一个圆形",
+            mode="auto",
+            provider=UnsafeProvider(),
+        )
+        self.assertEqual(result.backend, "local")
+        self.assertIn("circle_1 = Circle()", result.source)
+        self.assertIn("回退到本地规则", result.warning)
+
+    def test_provider_mode_requires_configuration(self):
+        with self.assertRaisesRegex(ProviderError, "未配置大模型"):
+            generate_scene_source(
+                "画一个圆形",
+                mode="provider",
+                environ={},
+            )
+
     def test_parse_multiple_objects_and_bind_action_to_latest(self):
         spec = parse_prompt("创建一个圆形和一个正方形，让正方形向右移动并旋转")
         self.assertEqual([obj.type for obj in spec.objects], ["circle", "square"])

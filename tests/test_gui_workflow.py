@@ -41,6 +41,25 @@ class DemoScene(Scene):
             window.source_edit.document().setModified(False)
             window.close()
 
+    def test_local_generation_runs_in_background_worker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            settings = QSettings(
+                str(Path(directory, "settings.ini")),
+                QSettings.Format.IniFormat,
+            )
+            window = MainWindow(settings=settings)
+            window.generation_mode_combo.setCurrentText("本地规则")
+            window.prompt_edit.setPlainText("画一个红色圆形")
+            window.generate_source()
+            worker = window.generation_worker
+            self.assertIsNotNone(worker)
+            self.assertTrue(worker.wait(5000))
+            self.app.processEvents()
+            self.assertIn("Circle().set_color(RED)", window.source_edit.toPlainText())
+            self.assertTrue(window.generate_button.isEnabled())
+            window.source_edit.document().setModified(False)
+            window.close()
+
 
 if __name__ == "__main__":
     unittest.main()

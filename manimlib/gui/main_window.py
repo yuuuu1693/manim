@@ -20,8 +20,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from manimlib.ai import generate_code, parse_image, parse_prompt
+from manimlib.ai import generate_code, parse_image
 from manimlib.code_checker import apply_safe_fixes, check_code, detect_scene_names
+from manimlib.gui.generation_worker import GenerationWorker
 from manimlib.gui.log_panel import LogPanel
 from manimlib.gui.preview_widget import PreviewWidget
 from manimlib.gui.render_controller import build_render_args
@@ -43,6 +44,7 @@ class MainWindow(QMainWindow):
         self.render_process.errorOccurred.connect(self._render_error)
         self.settings = settings or QSettings("ManimGLAssistant", "DesktopGUI")
         self.history: list[str] = []
+        self.generation_worker: GenerationWorker | None = None
         self._build_ui()
         self._restore_settings()
 
@@ -64,8 +66,14 @@ class MainWindow(QMainWindow):
         self.history_combo.setPlaceholderText("最近生成记录")
         self.history_combo.textActivated.connect(self.prompt_edit.setPlainText)
         buttons.addWidget(self.history_combo)
-        generate_button = QPushButton("生成代码")
-        generate_button.clicked.connect(self.generate_source)
+        self.generation_mode_combo = QComboBox()
+        self.generation_mode_combo.addItems(["自动生成", "本地规则", "大模型"])
+        self.generation_mode_combo.setToolTip(
+            "自动生成会优先使用已配置的大模型，失败时回退到本地规则"
+        )
+        buttons.addWidget(self.generation_mode_combo)
+        self.generate_button = QPushButton("生成代码")
+        self.generate_button.clicked.connect(self.generate_source)
         image_button = QPushButton("识别图片")
         image_button.clicked.connect(self.generate_from_image)
         check_button = QPushButton("检查代码")
@@ -81,7 +89,7 @@ class MainWindow(QMainWindow):
         self.stop_button = QPushButton("停止")
         self.stop_button.clicked.connect(self.stop_render)
         self.stop_button.setEnabled(False)
-        buttons.addWidget(generate_button)
+        buttons.addWidget(self.generate_button)
         buttons.addWidget(image_button)
         buttons.addWidget(check_button)
         buttons.addWidget(fix_button)
@@ -127,18 +135,45 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
 
     def generate_source(self) -> None:
-        try:
-            spec = parse_prompt(self.prompt_edit.toPlainText())
-            source = generate_code(spec)
-        except ValueError as exc:
-            QMessageBox.warning(self, "生成失败", str(exc))
-            self.log_panel.write(f"生成失败：{exc}")
+        if self.generation_worker is not None and self.generation_worker.isRunning():
+            self.log_panel.write("代码生成任务正在运行")
             return
-        self.source_edit.setPlainText(source)
+        modes = {"自动生成": "auto", "本地规则": "local", "大模型": "provider"}
+        prompt = self.prompt_edit.toPlainText()
+        self.generation_worker = GenerationWorker(
+            prompt,
+            modes[self.generation_mode_combo.currentText()],
+            self,
+        )
+        self.generation_worker.succeeded.connect(
+            lambda result: self._generation_succeeded(result, prompt)
+        )
+        self.generation_worker.failed.connect(self._generation_failed)
+        self.generation_worker.finished.connect(self._generation_finished)
+        self.generate_button.setEnabled(False)
+        self.log_panel.write("正在生成代码…")
+        self.generation_worker.start()
+
+    def _generation_succeeded(self, result, prompt: str) -> None:
+        self.source_edit.setPlainText(result.source)
         self.source_edit.document().setModified(True)
-        self._record_prompt(self.prompt_edit.toPlainText())
-        self.log_panel.write("代码生成完成")
+        self._record_prompt(prompt)
+        backend = "大模型" if result.backend == "provider" else "本地规则"
+        self.log_panel.write(f"代码生成完成：{backend}")
+        if result.warning:
+            self.log_panel.write(f"[WARNING] {result.warning}")
         self.check_source()
+
+    def _generation_failed(self, message: str) -> None:
+        QMessageBox.warning(self, "生成失败", message)
+        self.log_panel.write(f"生成失败：{message}")
+
+    def _generation_finished(self) -> None:
+        worker = self.generation_worker
+        self.generation_worker = None
+        self.generate_button.setEnabled(True)
+        if worker is not None:
+            worker.deleteLater()
 
     def generate_from_image(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -357,12 +392,15 @@ class MainWindow(QMainWindow):
         mode = str(self.settings.value("render_mode", "实时预览"))
         quality = str(self.settings.value("render_quality", "低清 480p"))
         scene_name = str(self.settings.value("scene_name", ""))
+        generation_mode = str(self.settings.value("generation_mode", "自动生成"))
         if self.mode_combo.findText(mode) >= 0:
             self.mode_combo.setCurrentText(mode)
         if self.quality_combo.findText(quality) >= 0:
             self.quality_combo.setCurrentText(quality)
         if self.scene_combo.findText(scene_name) >= 0:
             self.scene_combo.setCurrentText(scene_name)
+        if self.generation_mode_combo.findText(generation_mode) >= 0:
+            self.generation_mode_combo.setCurrentText(generation_mode)
         self.source_edit.document().setModified(False)
 
     def _save_settings(self) -> None:
@@ -373,6 +411,7 @@ class MainWindow(QMainWindow):
         self.settings.setValue("render_mode", self.mode_combo.currentText())
         self.settings.setValue("render_quality", self.quality_combo.currentText())
         self.settings.setValue("scene_name", self.scene_combo.currentText())
+        self.settings.setValue("generation_mode", self.generation_mode_combo.currentText())
         self.settings.sync()
 
     def _update_title(self, modified: bool) -> None:
@@ -380,6 +419,10 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"ManimGL 动画助手{marker}")
 
     def closeEvent(self, event) -> None:
+        if self.generation_worker is not None and self.generation_worker.isRunning():
+            QMessageBox.information(self, "代码生成", "代码正在生成，请等待任务完成后关闭")
+            event.ignore()
+            return
         if self.render_process.state() != QProcess.ProcessState.NotRunning:
             self.stop_render()
         if self.source_edit.document().isModified():

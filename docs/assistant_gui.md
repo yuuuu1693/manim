@@ -13,6 +13,22 @@ From the repository root, create or activate a Python 3.10+ environment and run:
 The GUI dependency group installs PySide6 Essentials and OpenCV. FFmpeg remains
 required for MP4 export.
 
+## Optional model provider
+
+The default **自动生成** mode remains fully offline when no provider is configured.
+To enable any OpenAI-compatible chat-completions endpoint, set environment
+variables before launching the GUI (never commit API keys to the repository):
+
+    $env:MANIM_AI_API_KEY="your-api-key"
+    $env:MANIM_AI_MODEL="your-model-name"
+    $env:MANIM_AI_BASE_URL="https://provider.example/v1"
+    $env:MANIM_AI_TIMEOUT="20"
+
+Use **本地规则** to force deterministic offline generation or **大模型** to
+require the configured provider. Provider output is accepted only after syntax,
+Scene, static-error, import, and dangerous-call validation. In automatic mode,
+provider errors fall back to local rules and are shown in the log.
+
 ## Start the application
 
     python run_gui.py
@@ -36,8 +52,8 @@ Ctrl+Z. Ambiguous or semantic changes are deliberately left for manual review.
 
 ## Current limitations
 
-- Natural-language parsing is deterministic and rule-based; it is not yet
-  connected to a large-language-model provider.
+- Offline generation supports a deterministic subset; broader requests require
+  a separately configured OpenAI-compatible provider.
 - Image recognition is intended for clear, non-overlapping circles, squares,
   and triangles on a light background.
 - Preview is shown in ManimGL's external window rather than embedded in Qt.

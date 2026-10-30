@@ -2,13 +2,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from manimlib.ai.code_generator import generate_code
-from manimlib.ai.prompt_parser import parse_prompt
+from manimlib.ai.provider import generate_scene_source
 
 
-def create_scene(prompt_text: str, output_path: str | Path) -> Path:
+def create_scene(
+    prompt_text: str,
+    output_path: str | Path,
+    mode: str = "auto",
+) -> Path:
     """Generate a scene file at an explicit destination."""
     destination = Path(output_path).expanduser().resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(generate_code(parse_prompt(prompt_text)), encoding="utf-8")
+    result = generate_scene_source(prompt_text, mode=mode)
+    destination.write_text(result.source, encoding="utf-8")
     return destination
