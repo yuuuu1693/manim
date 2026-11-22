@@ -68,6 +68,60 @@ class ModelScene(Scene):
         self.assertIn("circle_1 = Circle()", result.source)
         self.assertIn("回退到本地规则", result.warning)
 
+    def test_provider_repairs_invalid_code_once(self):
+        class RepairingProvider:
+            def __init__(self):
+                self.prompts = []
+
+            def generate(self, prompt):
+                self.prompts.append(prompt)
+                if len(self.prompts) == 1:
+                    return "from manimlib import *\nclass Broken(Scene):\n def construct(self)"
+                return """from manimlib import *
+
+class RepairedScene(Scene):
+    def construct(self):
+        self.add(Circle())
+        self.wait(1)
+"""
+
+        provider = RepairingProvider()
+        result = generate_scene_source("画一个圆", mode="provider", provider=provider)
+        self.assertEqual(result.backend, "provider")
+        self.assertIn("class RepairedScene(Scene)", result.source)
+        self.assertEqual(len(provider.prompts), 2)
+        self.assertIn("检查错误", provider.prompts[1])
+        self.assertIn("原始动画需求", provider.prompts[1])
+
+    def test_provider_repair_failure_falls_back_in_auto_mode(self):
+        class AlwaysBrokenProvider:
+            def __init__(self):
+                self.calls = 0
+
+            def generate(self, _prompt):
+                self.calls += 1
+                return "not valid python !!!"
+
+        provider = AlwaysBrokenProvider()
+        result = generate_scene_source("画一个圆形", mode="auto", provider=provider)
+        self.assertEqual(provider.calls, 2)
+        self.assertEqual(result.backend, "local")
+        self.assertIn("自动修复后仍未通过检查", result.warning)
+
+    def test_provider_validation_rejects_indirect_builtin_access(self):
+        class UnsafeProvider:
+            def generate(self, _prompt):
+                return """from manimlib import *
+
+class UnsafeScene(Scene):
+    def construct(self):
+        getattr(__builtins__, "open")("unsafe.txt", "w")
+        self.wait(1)
+"""
+
+        with self.assertRaisesRegex(ProviderError, "自动修复后仍未通过检查"):
+            generate_scene_source("画一个圆", mode="provider", provider=UnsafeProvider())
+
     def test_provider_mode_requires_configuration(self):
         with self.assertRaisesRegex(ProviderError, "未配置大模型"):
             generate_scene_source(

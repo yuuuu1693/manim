@@ -24,10 +24,16 @@ variables before launching the GUI (never commit API keys to the repository):
     $env:MANIM_AI_BASE_URL="https://provider.example/v1"
     $env:MANIM_AI_TIMEOUT="20"
 
+Alternatively, click **AI 配置** in the application. The API address, model,
+and timeout are saved for later launches. The API key uses a masked field and
+is kept in memory only for the current launch; it is never written to QSettings.
+
 Use **本地规则** to force deterministic offline generation or **大模型** to
 require the configured provider. Provider output is accepted only after syntax,
 Scene, static-error, import, and dangerous-call validation. In automatic mode,
-provider errors fall back to local rules and are shown in the log.
+invalid model code is returned to the provider once with the validation error for
+automatic repair. If the repair still fails, automatic mode falls back to local
+rules and shows the reason in the log.
 
 ## Start the application
 
@@ -51,7 +57,8 @@ animation, save a final PNG frame, or export an MP4 file. Saved PNG frames and
 MP4 videos are loaded into the embedded preview panel; videos include
 play/pause/replay controls.
 
-Static checks report syntax errors, unsafe dynamic execution, invalid animation
+Static checks report syntax errors, unsafe dynamic execution and indirect access
+to dangerous Python built-ins, invalid animation
 calls, undefined variables, variables used before assignment, and unused
 parameters. Each diagnostic includes a repair suggestion in the GUI log.
 The **安全修复** action can correct a unique, high-confidence local-variable typo

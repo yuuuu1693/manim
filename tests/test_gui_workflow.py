@@ -60,6 +60,29 @@ class DemoScene(Scene):
             window.source_edit.document().setModified(False)
             window.close()
 
+    def test_provider_settings_persist_without_api_key(self):
+        with tempfile.TemporaryDirectory() as directory:
+            settings = QSettings(
+                str(Path(directory, "settings.ini")),
+                QSettings.Format.IniFormat,
+            )
+            window = MainWindow(settings=settings)
+            window.ai_environ = {
+                "MANIM_AI_BASE_URL": "https://example.test/v1",
+                "MANIM_AI_MODEL": "demo-model",
+                "MANIM_AI_API_KEY": "top-secret",
+                "MANIM_AI_TIMEOUT": "15",
+            }
+            window._save_provider_settings()
+            settings.sync()
+            self.assertEqual(settings.value("ai/model"), "demo-model")
+            self.assertEqual(settings.value("ai/timeout"), "15")
+            self.assertIsNone(settings.value("ai/api_key"))
+            persisted = {key: settings.value(key) for key in settings.allKeys()}
+            self.assertNotIn("top-secret", persisted.values())
+            window.source_edit.document().setModified(False)
+            window.close()
+
     def test_preview_widget_loads_rendered_image(self):
         from PySide6.QtGui import QColor, QImage
         from manimlib.gui.preview_widget import PreviewWidget

@@ -26,8 +26,12 @@ FORBIDDEN_IMPORT_ROOTS = {
     "http", "os", "pathlib", "requests", "shutil", "socket",
     "subprocess", "sys", "urllib",
 }
-FORBIDDEN_CALL_ROOTS = FORBIDDEN_IMPORT_ROOTS | {"eval", "exec", "open", "input"}
+FORBIDDEN_CALL_ROOTS = FORBIDDEN_IMPORT_ROOTS | {
+    "__import__", "compile", "delattr", "eval", "exec", "getattr",
+    "globals", "input", "locals", "open", "setattr", "vars",
+}
 ALLOWED_IMPORT_ROOTS = {"manimlib", "math", "numpy"}
+MAX_REPAIR_SOURCE_LENGTH = 20_000
 
 
 class SceneCodeProvider(Protocol):
@@ -156,7 +160,7 @@ def generate_scene_source(
         return GenerationResult(_generate_locally(prompt), "local")
 
     try:
-        source = validate_generated_source(active_provider.generate(prompt))
+        source = _generate_validated_with_repair(active_provider, prompt)
         return GenerationResult(source, "provider")
     except (ProviderError, ValueError) as provider_error:
         if mode == "provider":
@@ -196,6 +200,43 @@ def _generate_locally(prompt: str) -> str:
     return generate_code(parse_prompt(prompt))
 
 
+def _generate_validated_with_repair(
+    provider: SceneCodeProvider,
+    prompt: str,
+) -> str:
+    """Ask once for a correction when otherwise usable model code is invalid."""
+    raw_source = provider.generate(prompt)
+    try:
+        return validate_generated_source(raw_source)
+    except ProviderError as first_error:
+        repair_prompt = _build_repair_prompt(prompt, raw_source, first_error)
+        repaired_source = provider.generate(repair_prompt)
+        try:
+            return validate_generated_source(repaired_source)
+        except ProviderError as second_error:
+            raise ProviderError(
+                f"大模型自动修复后仍未通过检查：{second_error}"
+            ) from second_error
+
+
+def _build_repair_prompt(
+    original_prompt: str,
+    raw_source: str,
+    error: ProviderError,
+) -> str:
+    source = raw_source[:MAX_REPAIR_SOURCE_LENGTH]
+    return f"""你上一次生成的 ManimGL 代码未通过检查。请修复代码并只返回完整 Python 代码。
+原始动画需求：
+{original_prompt}
+
+检查错误：
+{error}
+
+待修复代码：
+{source}
+"""
+
+
 def _validate_imports_and_calls(tree: ast.Module) -> None:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -211,6 +252,10 @@ def _validate_imports_and_calls(tree: ast.Module) -> None:
             root = _call_root(node.func)
             if root in FORBIDDEN_CALL_ROOTS:
                 raise ProviderError(f"禁止调用：{root}")
+        elif isinstance(node, ast.Attribute) and node.attr.startswith("__"):
+            raise ProviderError(f"禁止访问特殊属性：{node.attr}")
+        elif isinstance(node, ast.Name) and node.id.startswith("__"):
+            raise ProviderError(f"禁止访问特殊名称：{node.id}")
 
 
 def _call_root(node: ast.expr) -> str:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import json
+import os
 from pathlib import Path
 
 from PySide6.QtCore import QProcess, QSettings, QTimer, QUrl
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
 from manimlib.ai import generate_code, parse_image
 from manimlib.code_checker import apply_safe_fixes, check_code, detect_scene_names
 from manimlib.gui.generation_worker import GenerationWorker
+from manimlib.gui.ai_settings_dialog import AISettingsDialog
 from manimlib.gui.log_panel import LogPanel
 from manimlib.gui.preview_widget import PreviewWidget
 from manimlib.gui.render_controller import build_render_args, get_preview_output_path
@@ -44,6 +46,7 @@ class MainWindow(QMainWindow):
         self.render_process.errorOccurred.connect(self._render_error)
         self.settings = settings or QSettings("ManimGLAssistant", "DesktopGUI")
         self.history: list[str] = []
+        self.ai_environ: dict[str, str] = {}
         self.generation_worker: GenerationWorker | None = None
         self.pending_preview_path: Path | None = None
         self._build_ui()
@@ -73,6 +76,9 @@ class MainWindow(QMainWindow):
             "自动生成会优先使用已配置的大模型，失败时回退到本地规则"
         )
         buttons.addWidget(self.generation_mode_combo)
+        ai_settings_button = QPushButton("AI 配置")
+        ai_settings_button.clicked.connect(self.configure_ai)
+        buttons.addWidget(ai_settings_button)
         self.generate_button = QPushButton("生成代码")
         self.generate_button.clicked.connect(self.generate_source)
         image_button = QPushButton("识别图片")
@@ -145,7 +151,8 @@ class MainWindow(QMainWindow):
         self.generation_worker = GenerationWorker(
             prompt,
             modes[self.generation_mode_combo.currentText()],
-            self,
+            environ=self._provider_environ(),
+            parent=self,
         )
         self.generation_worker.succeeded.connect(
             lambda result: self._generation_succeeded(result, prompt)
@@ -155,6 +162,38 @@ class MainWindow(QMainWindow):
         self.generate_button.setEnabled(False)
         self.log_panel.write("正在生成代码…")
         self.generation_worker.start()
+
+    def configure_ai(self) -> None:
+        dialog = AISettingsDialog(self._provider_environ(), self)
+        if dialog.exec() != AISettingsDialog.DialogCode.Accepted:
+            return
+        self.ai_environ = dialog.provider_environ()
+        self._save_provider_settings()
+        self.log_panel.write(
+            f"大模型配置已更新：{self.ai_environ['MANIM_AI_MODEL']}"
+        )
+
+    def _provider_environ(self) -> dict[str, str]:
+        values = {
+            "MANIM_AI_BASE_URL": os.environ.get(
+                "MANIM_AI_BASE_URL", "https://api.openai.com/v1"
+            ),
+            "MANIM_AI_MODEL": os.environ.get("MANIM_AI_MODEL", ""),
+            "MANIM_AI_API_KEY": os.environ.get("MANIM_AI_API_KEY", ""),
+            "MANIM_AI_TIMEOUT": os.environ.get("MANIM_AI_TIMEOUT", "20"),
+        }
+        values.update(self.ai_environ)
+        return values
+
+    def _save_provider_settings(self) -> None:
+        self.settings.setValue(
+            "ai/base_url", self.ai_environ.get("MANIM_AI_BASE_URL", "")
+        )
+        self.settings.setValue("ai/model", self.ai_environ.get("MANIM_AI_MODEL", ""))
+        self.settings.setValue(
+            "ai/timeout", self.ai_environ.get("MANIM_AI_TIMEOUT", "20")
+        )
+        self.settings.sync()
 
     def _generation_succeeded(self, result, prompt: str) -> None:
         self.source_edit.setPlainText(result.source)
@@ -413,6 +452,23 @@ class MainWindow(QMainWindow):
         self.history_combo.addItems(self.history)
 
     def _restore_settings(self) -> None:
+        self.ai_environ = {
+            "MANIM_AI_BASE_URL": str(
+                self.settings.value(
+                    "ai/base_url",
+                    os.environ.get("MANIM_AI_BASE_URL", "https://api.openai.com/v1"),
+                )
+            ),
+            "MANIM_AI_MODEL": str(
+                self.settings.value("ai/model", os.environ.get("MANIM_AI_MODEL", ""))
+            ),
+            "MANIM_AI_API_KEY": os.environ.get("MANIM_AI_API_KEY", ""),
+            "MANIM_AI_TIMEOUT": str(
+                self.settings.value(
+                    "ai/timeout", os.environ.get("MANIM_AI_TIMEOUT", "20")
+                )
+            ),
+        }
         geometry = self.settings.value("window_geometry")
         if geometry:
             self.restoreGeometry(geometry)
