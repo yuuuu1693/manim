@@ -103,38 +103,39 @@ class Mobject(object):
         depth_test: bool = False,
         z_index: int = 0,
     ):
-        self.color = color
-        self.opacity = opacity
-        self.shading = shading
-        self.texture_paths = texture_paths or dict()
-        self.depth_test = depth_test
-        self.z_index = z_index
+        # 图形基类Mobject构造方法，创建图形对象并初始化基础属性
+        self.color = color # 设置图形颜色
+        self.opacity = opacity # 设置图形透明度
+        self.shading = shading # 设置着色参数
+        self.texture_paths = texture_paths or dict() # 纹理资源路径字典
+        self.depth_test = depth_test # 是否开启深度检测
+        self.z_index = z_index # 图层层级，控制前后遮挡
 
-        # Internal state
-        self.submobjects: list[Mobject] = []
-        self.parents: list[Mobject] = []
-        self.family: list[Mobject] | None = [self]
-        self.saved_state = None
-        self.target = None
-        self.bounding_box: Vect3Array = np.zeros((3, 3))
+        # Internal state 内部状态变量
+        self.submobjects: list[Mobject] = [] # 存储子图形对象列表
+        self.parents: list[Mobject] = [] # 父对象列表
+        self.family: list[Mobject] | None = [self] # 当前对象及其所有子对象集合
+        self.saved_state = None # 保存图形动画前状态，配合save_state使用
+        self.target = None # 动画目标状态
+        self.bounding_box: Vect3Array = np.zeros((3, 3)) # 图形包围盒
         # Whether the box is the same at both ends of an animation, and so wants no blending,
         # see prepare_interpolation
-        self.skip_box_interpolation: bool = False
-        self._is_animating: bool = False
-        self._needs_new_bounding_box: bool = True
-        self.shader_code_replacements: dict[str, str] = dict()
+        self.skip_box_interpolation: bool = False # 是否跳过包围盒插值
+        self._is_animating: bool = False # 对象是否正在执行动画
+        self._needs_new_bounding_box: bool = True # 是否需要重新计算包围盒
+        self.shader_code_replacements: dict[str, str] = dict() # 着色器替换配置
 
-        self.init_data()
-        self.init_uniforms()
-        self.init_updaters()
-        self.init_event_listners()
-        self.init_points()
-        self.init_colors()
+        self.init_data() # 初始化顶点数据
+        self.init_uniforms() # 初始化着色器uniform变量
+        self.init_updaters() # 初始化更新器
+        self.init_event_listners() # 初始化事件监听器
+        self.init_points() # 初始化顶点坐标
+        self.init_colors() # 初始化顶点颜色
 
         if self.depth_test:
-            self.apply_depth_test()
+            self.apply_depth_test() # 开启深度检测
         if is_fixed_in_frame:
-            self.fix_in_frame()
+            self.fix_in_frame() # 设置图形固定在画面，不跟随相机旋转
 
     def __str__(self):
         return self.__class__.__name__
@@ -679,9 +680,10 @@ class Mobject(object):
         return self.target
 
     def save_state(self, use_deepcopy: bool = False) -> Self:
-        self.saved_state = self.copy(deep=use_deepcopy)
-        self.saved_state.target = self.target
-        return self
+        # 保存图形当前状态，用于动画插值，是动画播放的底层基础
+        self.saved_state = self.copy(deep=use_deepcopy) # 复制当前对象，保存到saved_state
+        self.saved_state.target = self.target # 保存动画目标对象引用
+        return self # 返回自身，支持链式调用
 
     def restore(self) -> Self:
         if not hasattr(self, "saved_state") or self.saved_state is None:
@@ -900,13 +902,14 @@ class Mobject(object):
             mob._is_animating = is_animating
         return self
 
-    # Transforming operations
+    # Transforming operations 几何变换操作集
 
     def shift(self, vector: Vect3) -> Self:
+        # 调用内部统一的点集处理函数，传入平移运算逻辑
         self.apply_points_function(
-            lambda points: points + vector,
-            about_edge=None,
-            works_on_bounding_box=True,
+            lambda points: points + vector, # 核心运算：所有顶点坐标批量加上平移向量
+            about_edge=None,  # 不基于边缘对齐
+            works_on_bounding_box=True, # 同步更新图形的包围盒，保证边界计算准确
         )
         return self
 
@@ -926,19 +929,22 @@ class Mobject(object):
         Otherwise, if about_point is given a value, scaling is done with
         respect to that point.
         """
+        # 限制最小缩放系数，防止缩放值过小造成数值异常
         if isinstance(scale_factor, numbers.Number):
             scale_factor = max(scale_factor, min_scale_factor)
         else:
             scale_factor = np.array(scale_factor).clip(min=min_scale_factor)
+        # 调用统一点集处理函数，传入缩放运算逻辑
         self.apply_points_function(
-            lambda points: scale_factor * points,
-            about_point=about_point,
-            about_edge=about_edge,
-            works_on_bounding_box=True,
+            lambda points: scale_factor * points, # 核心运算：所有顶点坐标乘以缩放系数
+            about_point=about_point, # 缩放中心点
+            about_edge=about_edge, # 以图形边缘作为缩放参考点
+            works_on_bounding_box=True, # 同步更新图形包围盒
         )
+        # 遍历所有子图形对象，执行缩放附带的后续处理
         for mob in self.get_family():
             mob._handle_scale_side_effects(scale_factor)
-        return self
+        return self # 返回自身，支持链式调用
 
     def _handle_scale_side_effects(self, scale_factor):
         # In case subclasses, such as DecimalNumber, need to make

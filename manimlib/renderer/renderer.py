@@ -79,58 +79,63 @@ class Renderer(object):
     per mobject.
     """
 
+    # __init__：Renderer渲染器类构造方法，初始化渲染管线相关全部成员变量
     def __init__(self, gpu: Gpu, bundle: bool = True, together: bool = True):
-        self.gpu = gpu
-        self.may_merge = together
-        self.bundling = Bundling(allowed=bundle)
-        self.materials: dict[tuple, Material] = dict()
-        self.drawings: dict[Mobject, Drawing] = dict()
-        self.drawn: list[Drawing] = []
-        self.leaders: list[Drawing] = []
-        self.run_lengths: tuple = ()
-        self.samples = gpu.samples
+        self.gpu = gpu # 绑定GPU设备对象，用于调用底层GPU接口
+        self.may_merge = together # 设置是否允许合并绘制指令，减少GPU调用次数
+        self.bundling = Bundling(allowed=bundle) # 创建批处理打包对象，控制图形批渲染功能
+        self.materials: dict[tuple, Material] = dict() # 材质字典，缓存不同样式的材质
+        self.drawings: dict[Mobject, Drawing] = dict() # 图形对象与绘制数据的映射表
+        self.drawn: list[Drawing] = [] # 保存当前帧待绘制的绘制对象列表
+        self.leaders: list[Drawing] = [] # 辅助标注类图形绘制对象列表
+        self.run_lengths: tuple = () # 图形批次长度元组，用于批量渲染
+        self.samples = gpu.samples # 获取GPU多重采样数量，控制抗锯齿效果
 
+    # draw：Renderer渲染器核心绘制方法，负责一帧内所有图形的批处理渲染
     def draw(self, mobjects: Iterable[Mobject], attachments: dict) -> None:
-        gpu = self.gpu
-        drawings = self.resolve(mobjects)
+        gpu = self.gpu # 获取底层GPU操作对象
+        drawings = self.resolve(mobjects) # 将Mobject图形对象解析为绘制数据Drawing
         if drawings != self.drawn:
-            self.bundling.invalidate()
-        self.drawn = drawings
+            self.bundling.invalidate() # 图形发生变化，使批渲染缓存失效
+        self.drawn = drawings # 记录当前帧的绘制对象
 
-        rebinds = gpu.rebinds
-        gpu.begin_writes()
-        regroup = False
-        for drawing in drawings:
-            if drawing.write_uniforms():
-                regroup = True
+        rebinds = gpu.rebinds # 保存GPU绑定状态标记
+        gpu.begin_writes() # 开启GPU数据写入阶段
+        regroup = False # 是否需要重新分组绘制的标记
+        for drawing in drawings: # 遍历所有待绘制图形
+            if drawing.write_uniforms(): # 向GPU写入着色器统一变量
+                regroup = True # 变量变更，标记需要重新分组
             if drawing.invalidated:
-                self.bundling.invalidate()
+                self.bundling.invalidate() # 图形数据失效，清空批渲染缓存
         # A frame where nothing which decides the runs moved keeps last frame's
+        # 如果批缓存过期或者需要重分组，则重新对绘制对象分组
         if self.bundling.stale or regroup:
-            lengths = self.group(drawings)
+            lengths = self.group(drawings) # 按照材质分组图形，实现批渲染
             if lengths != self.run_lengths:
                 self.bundling.invalidate()
             self.run_lengths = lengths
-        for leader in self.leaders:
-            leader.write_records()
+        for leader in self.leaders: # 遍历标注类辅助图形
+            leader.write_records() # 写入辅助图形绘制记录
             if leader.invalidated:
                 self.bundling.invalidate()
-        gpu.end_writes()
+        gpu.end_writes() # 结束GPU数据写入阶段
         if gpu.rebinds != rebinds or gpu.samples != self.samples:
-            self.bundling.invalidate()
-        self.samples = gpu.samples
+            self.bundling.invalidate() # GPU参数改变，使批渲染缓存失效
+        self.samples = gpu.samples # 更新抗锯齿采样参数
 
-        bundle = self.bundling.take(lambda: gpu.bundle(self.make_draws))
-        with gpu.render_pass(attachments) as render_pass:
+        bundle = self.bundling.take(lambda: gpu.bundle(self.make_draws)) # 获取绘制指令批包
+        with gpu.render_pass(attachments) as render_pass: # 开启一次GPU渲染通道
             if bundle is None:
-                self.make_draws(render_pass)
+                self.make_draws(render_pass) # 无缓存批包，实时执行绘制指令
             else:
-                render_pass.replay(bundle)
+                render_pass.replay(bundle) # 复用缓存批包，直接回放绘制指令，提升渲染性能
 
     def make_draws(self, render_pass: RenderPass) -> None:
         for leader in self.leaders:
             leader.draw(render_pass)
 
+    # 注释：该方法用于将可连续绘制的Drawing对象合并批次，实现GPU批渲染
+ #注释：满足相同材质、一致uniform变量的图形合并为一个绘制批次，减少GPU调用次数
     def group(self, drawings: list[Drawing]) -> tuple:
         """
         Gathers consecutive mobjects which one draw can cover: the same material, nothing about
@@ -140,23 +145,26 @@ class Renderer(object):
         Leaves the mobjects which draw in self.leaders, each holding the run it draws, and
         gives back how long each run came out, which is what says the gathering has moved.
         """
+        # 判断是否允许合并批次，不允许合并则每个图形单独为一组
         if not self.may_merge:
             self.leaders = list(drawings)
             return (1,) * len(drawings)
 
-        self.compare_uniforms(drawings)
+        self.compare_uniforms(drawings) # 对比所有绘制对象的uniform着色器变量
+        # 根据can_follow规则，对drawings进行批次分组
         runs = batch_by_comparison(
             drawings, lambda prev, drawing: drawing.can_follow(prev)
         )
 
         # Pull out first of each run as a leader
+        # 提取每一组的第一个对象作为leader（批次代表对象）
         self.leaders = []
         lengths = []
         for run in runs:
-            run[0].members = run if len(run) > 1 else None
+            run[0].members = run if len(run) > 1 else None # 将同组其余对象挂载到leader
             self.leaders.append(run[0])
             lengths.append(len(run))
-        return tuple(lengths)
+        return tuple(lengths) # 返回每个批次包含图形数量的元组
 
     def compare_uniforms(self, drawings: list[Drawing]) -> None:
         """
@@ -177,6 +185,8 @@ class Renderer(object):
                 claims = matching[buffer] = buffer.matching_claims()
             drawing.repeats_uniforms = claims[drawing.uniform_offset // buffer.window]
 
+    # 注释该方法用于将场景中的Mobject图形对象集合，转换为GPU可识别的Drawing绘制对象列表
+    # 会根据z_index深度值完成图形排序，过滤掉不需要渲染的空图形
     def resolve(self, mobjects: Iterable[Mobject]) -> list[Drawing]:
         """
         A drawing for every member of every family which has anything to draw, in drawing
@@ -185,28 +195,30 @@ class Renderer(object):
 
         Mobjects asking to be drawn out of that order say so with a z_index.
         """
-        held = self.drawings
-        self.drawings = dict()
-        drawn = []
-        ascending = True
-        prev_z = 0
-        for mobject in mobjects:
-            for mob in mobject.get_family():
-                drawing_class = mob.drawing_class
+        held = self.drawings # 保存上一帧缓存的绘制对象
+        self.drawings = dict() # 重置当前帧绘制对象字典
+        drawn = [] # 存放最终解析完成的Drawing列表
+        ascending = True # 标记z轴排序方向
+        prev_z = 0 # 记录上一个图形的z深度值
+        for mobject in mobjects: # 遍历所有传入的图形Mobject
+            for mob in mobject.get_family(): # 遍历图形自身及其子对象（Group组合图形）
+                drawing_class = mob.drawing_class # 获取该图形对应的绘制类
                 if len(mob.data) == 0 or not drawing_class.draws(mob):
-                    continue
-                drawing = held.get(mob)
+                    continue # 无顶点数据或者无着色器，跳过不渲染
+                drawing = held.get(mob) # 尝试复用缓存里上一帧的Drawing对象
                 if drawing is None or drawing.replacements is not mob.shader_code_replacements:
+                    # 缓存不存在或者着色器发生变更，则新建Drawing对象
                     drawing = drawing_class(self.material_for(mob, drawing_class), mob)
-                self.drawings[mob] = drawing
-                drawn.append(drawing)
-                z = mob.z_index
+                self.drawings[mob] = drawing # 将绘制对象存入字典缓存
+                drawn.append(drawing) # 加入待渲染列表
+                z = mob.z_index # 获取图形的深度序号z_index
                 if z < prev_z:
-                    ascending = False
+                    ascending = False # 出现z值变小，说明顺序不是升序
                 prev_z = z
         if not ascending:
+            # 如果z轴乱序，按照z_index重新排序，处理图层遮挡
             drawn.sort(key=lambda drawing: drawing.mobject.z_index)
-        return drawn
+        return drawn # 返回解析、排序完成的Drawing列表
 
     def material_for(self, mobject: Mobject, drawing_class: type) -> Material:
         """
