@@ -18,7 +18,7 @@ def generate_code(spec: SceneSpec | dict[str, object], class_name: str = "Genera
         "import numpy as np",
         "",
         "",
-        f"class {class_name}(Scene):",
+        f"class {class_name}({'ThreeDScene' if any(obj.type == 'pyramid' for obj in spec.objects) else 'Scene'}):",
         "    def construct(self):",
     ]
     lines.extend(render_object(obj) for obj in spec.objects)

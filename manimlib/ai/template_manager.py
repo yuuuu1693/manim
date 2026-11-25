@@ -38,6 +38,10 @@ def render_object(obj: SceneObject) -> str:
         if not isinstance(content, str) or not content:
             raise ValueError("Text objects require non-empty content")
         constructor = f"Text({json.dumps(content, ensure_ascii=False)})"
+    elif obj.type == "irregular_triangle":
+        constructor = _irregular_triangle_constructor(obj)
+    elif obj.type == "pyramid":
+        constructor = _pyramid_constructor(obj)
     else:
         try:
             constructor = OBJECT_CONSTRUCTORS[obj.type]
@@ -103,7 +107,9 @@ def render_action(action_type: str, target: str | None, parameters: dict[str, ob
         vector = direction if distance == 1 else f"{direction} * {distance:g}"
         return _play(f"{target}.animate.shift({vector})", parameters)
     if action_type == "rotate":
-        return _play(f"Rotate({target})", parameters)
+        axis = parameters.get("axis")
+        suffix = "" if axis is None else f", axis={_constant(axis, 'axis')}"
+        return _play(f"Rotate({target}{suffix})", parameters)
     if action_type == "scale":
         factor = _positive_number(parameters.get("factor", 1), "factor")
         return _play(f"{target}.animate.scale({factor:g})", parameters)
@@ -186,3 +192,54 @@ def _safe_expression(value: object) -> str:
             if node.attr not in {"sin", "cos", "tan", "exp", "log", "sqrt"}:
                 raise ValueError(f"Unsupported function: {node.attr!r}")
     return expression
+
+
+def _irregular_triangle_constructor(obj: SceneObject) -> str:
+    sides = obj.properties.get("side_lengths")
+    if sides is None:
+        points = ((-1.8, -1.0, 0.0), (1.6, -0.7, 0.0), (0.4, 1.5, 0.0))
+    else:
+        if not isinstance(sides, (list, tuple)) or len(sides) != 3:
+            raise ValueError("side_lengths must contain three numbers")
+        a, b, c = (float(value) for value in sides)
+        if min(a, b, c) <= 0 or max(a, b, c) * 2 >= a + b + c:
+            raise ValueError("Invalid triangle side lengths")
+        x = (b * b + c * c - a * a) / (2 * c)
+        y = (b * b - x * x) ** 0.5
+        raw = ((0.0, 0.0, 0.0), (c, 0.0, 0.0), (x, y, 0.0))
+        center_x = sum(point[0] for point in raw) / 3
+        center_y = sum(point[1] for point in raw) / 3
+        scale = 3.5 / max(a, b, c)
+        points = tuple(
+            ((px - center_x) * scale, (py - center_y) * scale, pz)
+            for px, py, pz in raw
+        )
+    rendered = ", ".join(
+        f"np.array([{x:g}, {y:g}, {z:g}])" for x, y, z in points
+    )
+    return f"Polygon({rendered})"
+
+
+def _pyramid_constructor(obj: SceneObject) -> str:
+    sides = int(obj.properties.get("base_sides", 4))
+    apex = "np.array([0, 0, 1.6])"
+    if sides == 3:
+        base = (
+            "np.array([-1.4, -0.8, -1])",
+            "np.array([1.4, -0.8, -1])",
+            "np.array([0, 1.4, -1])",
+        )
+    elif sides == 4:
+        base = (
+            "np.array([-1, -1, -1])",
+            "np.array([1, -1, -1])",
+            "np.array([1, 1, -1])",
+            "np.array([-1, 1, -1])",
+        )
+    else:
+        raise ValueError("Pyramid base_sides must be 3 or 4")
+    faces = [f"Polygon({', '.join(base)})"]
+    for index, point in enumerate(base):
+        following = base[(index + 1) % len(base)]
+        faces.append(f"Polygon({point}, {following}, {apex})")
+    return f"VGroup3D({', '.join(faces)})"

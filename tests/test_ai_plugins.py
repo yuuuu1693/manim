@@ -190,6 +190,32 @@ class UnsafeScene(Scene):
         self.assertIn("group_1.animate.shift(RIGHT * 2)", source)
         self.assertIn("group_1.animate.scale(2)", source)
 
+    def test_irregular_triangle_uses_scalene_vertices(self):
+        source = generate_code(parse_prompt("创建一个紫色不规则三角形并旋转"))
+        self.assertIn("irregular_triangle_1 = Polygon(np.array(", source)
+        self.assertIn(".set_color(PURPLE)", source)
+        self.assertIn("Rotate(irregular_triangle_1)", source)
+        self.assertEqual(check_code(source), [])
+
+    def test_irregular_triangle_accepts_three_side_lengths(self):
+        source = generate_code(
+            parse_prompt("创建一个三边长为3、4、5的不规则三角形")
+        )
+        self.assertIn("Polygon(np.array(", source)
+        self.assertNotIn("Triangle()", source)
+        with self.assertRaisesRegex(ValueError, "三角形条件"):
+            parse_prompt("创建一个三边长为1、2、5的不规则三角形")
+
+    def test_square_and_triangular_pyramids_generate_3d_scenes(self):
+        square_source = generate_code(parse_prompt("创建一个蓝色四棱锥并旋转"))
+        self.assertIn("class GeneratedScene(ThreeDScene):", square_source)
+        self.assertIn("pyramid_1 = VGroup3D(", square_source)
+        self.assertEqual(square_source.count("Polygon("), 5)
+        self.assertIn("Rotate(pyramid_1, axis=UP)", square_source)
+        triangular_source = generate_code(parse_prompt("创建一个红色三棱锥"))
+        self.assertEqual(triangular_source.count("Polygon("), 4)
+        self.assertEqual(check_code(triangular_source), [])
+
     def test_empty_and_unsupported_prompts_are_rejected(self):
         with self.assertRaisesRegex(ValueError, "不能为空"):
             parse_prompt("   ")

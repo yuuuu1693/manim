@@ -6,12 +6,14 @@ from manimlib.ai.models import ActionSpec, SceneObject, SceneSpec
 
 
 OBJECT_PATTERNS = (
+    ("pyramid", re.compile(r"三棱锥|四棱锥|棱锥")),
+    ("irregular_triangle", re.compile(r"不规则三角形|不等边三角形")),
     ("annulus", re.compile(r"圆环|环形")),
     ("ellipse", re.compile(r"椭圆(?:形)?")),
     ("circle", re.compile(r"(?<!椭)圆(?!点|环)(?:形)?")),
     ("rectangle", re.compile(r"长方形|矩形")),
     ("square", re.compile(r"正方形|(?<!长)方形")),
-    ("triangle", re.compile(r"三角形")),
+    ("triangle", re.compile(r"(?<!不规则)(?<!不等边)三角形")),
     ("arrow", re.compile(r"箭头")),
     ("line", re.compile(r"直线|线段")),
     ("dot", re.compile(r"圆点|点")),
@@ -108,6 +110,22 @@ def parse_prompt(text: str) -> SceneSpec:
             properties["expression"] = _normalize_expression(function_match.group(1))
             properties["axes"] = "axes_1"
             properties.setdefault("color", "BLUE")
+        elif object_type == "pyramid":
+            pyramid_text = declaration_text[position:position + 4]
+            properties["base_sides"] = 3 if "三棱锥" in pyramid_text else 4
+        elif object_type == "irregular_triangle":
+            side_match = re.search(
+                r"三边(?:长)?(?:分别)?(?:为|是)?\s*"
+                r"(\d+(?:\.\d+)?)\s*[,，、]\s*"
+                r"(\d+(?:\.\d+)?)\s*[,，、]\s*"
+                r"(\d+(?:\.\d+)?)",
+                text,
+            )
+            if side_match:
+                sides = tuple(float(side_match.group(i)) for i in range(1, 4))
+                if min(sides) <= 0 or max(sides) * 2 >= sum(sides):
+                    raise ValueError("不规则三角形的三边长度不满足三角形条件")
+                properties["side_lengths"] = sides
         objects.append(
             SceneObject(
                 f"{object_type}_{counters[object_type]}",
@@ -133,7 +151,7 @@ def parse_prompt(text: str) -> SceneSpec:
 
     initial_action = "fade_in" if re.search(r"淡入|渐显", text) else "create"
     actions = [
-        ActionSpec(initial_action, obj.name)
+        ActionSpec("fade_in" if obj.type == "pyramid" else initial_action, obj.name)
         for obj in objects
         if obj.type != "group"
     ]
@@ -153,6 +171,10 @@ def parse_prompt(text: str) -> SceneSpec:
         actions.append(ActionSpec("move", target, parameters))
     if "旋转" in text:
         parameters = {"duration": duration} if duration is not None else {}
+        if next((obj for obj in objects if obj.name == target), None) and next(
+            obj for obj in objects if obj.name == target
+        ).type == "pyramid":
+            parameters["axis"] = "UP"
         actions.append(ActionSpec("rotate", target, parameters))
     match = re.search(r"(?:放大|缩放)(?:到|为)?\s*(\d+(?:\.\d+)?)\s*倍", text)
     if match:
@@ -199,6 +221,8 @@ def _resolve_target(text: str, objects: list[SceneObject]) -> str:
             "annulus": ("圆环", "环形"),
             "square": ("正方形", "方形"),
             "triangle": ("三角形",),
+            "irregular_triangle": ("不规则三角形", "不等边三角形"),
+            "pyramid": ("三棱锥", "四棱锥", "棱锥"),
             "rectangle": ("长方形", "矩形"),
             "ellipse": ("椭圆", "椭圆形"),
             "dot": ("圆点", "点"),

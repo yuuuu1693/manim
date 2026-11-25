@@ -18,6 +18,8 @@ SUPPORTED_OBJECTS = {
     "text",
     "triangle",
     "group",
+    "irregular_triangle",
+    "pyramid",
 }
 SUPPORTED_ACTIONS = {
     "create",

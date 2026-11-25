@@ -63,6 +63,12 @@ Example composition prompts:
     创建一个圆和一个正方形，让两个图形相切
     创建一个圆环和一个正方形，让它们自动居中组合
     创建一个圆和一个正方形，将两个图形作为一个整体向右移动2个单位并缩放2倍
+    创建一个三边长为3、4、5的紫色不规则三角形并旋转
+    创建一个蓝色四棱锥并旋转
+
+Irregular triangles can use a built-in scalene shape or three explicit side
+lengths. Triangular and square pyramids are assembled from polygon faces and
+automatically use a `ThreeDScene` camera orientation.
 
 The application can generate and check source code, recognize basic geometric
 images, open or export Python scenes, select a Scene subclass, preview the
