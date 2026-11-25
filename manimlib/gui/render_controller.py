@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -118,3 +119,28 @@ def get_preview_output_path(
     except KeyError as exc:
         raise ValueError(f"未知渲染模式：{mode}") from exc
     return Path(project_root).resolve() / "videos" / f"{file_name}{suffix}"
+
+
+def classify_render_failure(output: str) -> str | None:
+    """Return a concise actionable diagnosis for common render failures."""
+    text = output.lower()
+    rules = (
+        (("ffmpeg", "ffprobe"), "未检测到可用的 FFmpeg，请安装 FFmpeg 并加入 PATH。"),
+        (("latex", "texlive", "xelatex", "dvisvgm"), "LaTeX/TeX Live 不可用，请检查安装目录和 PATH。"),
+        (("opengl", "glfw", "moderngl", "egl"), "OpenGL 初始化失败，请更新显卡驱动或检查远程桌面环境。"),
+        (("no module named", "modulenotfounderror"), "当前 Python 解释器缺少项目依赖，请在该环境中安装项目及 GUI 依赖。"),
+        (("permissionerror", "access is denied"), "输出文件或目录没有写入权限，请更换输出位置或关闭占用文件的程序。"),
+        (("memoryerror", "out of memory"), "渲染内存不足，请降低质量、减少对象或关闭其他占用资源的程序。"),
+    )
+    for needles, message in rules:
+        if any(needle in text for needle in needles):
+            return message
+    return None
+
+
+def parse_render_progress(output: str) -> int | None:
+    """Extract a bounded percentage from common progress-bar output."""
+    matches = re.findall(r"(?<!\d)(100|[1-9]?\d(?:\.\d+)?)%", output)
+    if not matches:
+        return None
+    return max(0, min(100, round(float(matches[-1]))))

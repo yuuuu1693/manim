@@ -82,6 +82,13 @@ animation, save a final PNG frame, or export an MP4 file. Saved PNG frames and
 MP4 videos are loaded into the embedded preview panel; videos include
 play/pause/replay controls.
 
+The render toolbar can select the exact Python interpreter used to launch
+ManimGL and configure a 10–3600 second timeout. Rendering shows an indeterminate
+busy state or a parsed percentage when the process reports one. Timeout stops
+the process safely, and common FFmpeg, LaTeX, OpenGL, missing-module,
+permission, and out-of-memory failures receive actionable diagnostics. The
+interpreter path and timeout are restored on the next launch.
+
 Static checks report syntax errors, unsafe dynamic execution and indirect access
 to dangerous Python built-ins, invalid animation
 calls, undefined variables, variables used before assignment, and unused

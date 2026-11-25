@@ -19,6 +19,8 @@ from manimlib.gui.render_controller import (
     RenderRequest,
     build_render_args,
     get_preview_output_path,
+    classify_render_failure,
+    parse_render_progress,
 )
 
 
@@ -481,6 +483,16 @@ class SecondScene(InteractiveScene):
             get_preview_output_path(root, "demo", "导出视频").name,
             "demo.mp4",
         )
+
+    def test_render_failure_diagnostics_and_progress(self):
+        self.assertIn("FFmpeg", classify_render_failure("ffmpeg was not found"))
+        self.assertIn("LaTeX", classify_render_failure("xelatex: command not found"))
+        self.assertIn("OpenGL", classify_render_failure("GLFW OpenGL init failed"))
+        self.assertIn("依赖", classify_render_failure("ModuleNotFoundError: No module named 'cv2'"))
+        self.assertIsNone(classify_render_failure("ordinary scene exception"))
+        self.assertEqual(parse_render_progress("Rendering 47.6%"), 48)
+        self.assertEqual(parse_render_progress("10% then 100%"), 100)
+        self.assertIsNone(parse_render_progress("Rendering frame 12"))
 
     def test_image_parser_recognizes_colored_circle_and_square(self):
         import cv2

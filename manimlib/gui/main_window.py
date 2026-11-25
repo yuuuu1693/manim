@@ -15,7 +15,10 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
+    QLineEdit,
+    QProgressBar,
     QPushButton,
+    QSpinBox,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -27,7 +30,12 @@ from manimlib.gui.generation_worker import GenerationWorker
 from manimlib.gui.ai_settings_dialog import AISettingsDialog
 from manimlib.gui.log_panel import LogPanel
 from manimlib.gui.preview_widget import PreviewWidget
-from manimlib.gui.render_controller import build_render_args, get_preview_output_path
+from manimlib.gui.render_controller import (
+    build_render_args,
+    classify_render_failure,
+    get_preview_output_path,
+    parse_render_progress,
+)
 from manimlib.gui.syntax_highlighter import PythonHighlighter
 
 
@@ -49,6 +57,11 @@ class MainWindow(QMainWindow):
         self.ai_environ: dict[str, str] = {}
         self.generation_worker: GenerationWorker | None = None
         self.pending_preview_path: Path | None = None
+        self.render_output_buffer = ""
+        self.render_timed_out = False
+        self.render_timeout_timer = QTimer(self)
+        self.render_timeout_timer.setSingleShot(True)
+        self.render_timeout_timer.timeout.connect(self._render_timeout)
         self._build_ui()
         self._restore_settings()
 
@@ -120,11 +133,30 @@ class MainWindow(QMainWindow):
         self.quality_combo = QComboBox()
         self.quality_combo.addItems(["低清 480p", "中清 720p", "高清 1080p"])
         render_options.addWidget(self.quality_combo)
+        render_options.addWidget(QLabel("Python"))
+        self.python_edit = QLineEdit(sys.executable)
+        self.python_edit.setMinimumWidth(220)
+        render_options.addWidget(self.python_edit)
+        python_button = QPushButton("选择解释器")
+        python_button.clicked.connect(self.select_python_interpreter)
+        render_options.addWidget(python_button)
+        render_options.addWidget(QLabel("超时"))
+        self.render_timeout_spin = QSpinBox()
+        self.render_timeout_spin.setRange(10, 3600)
+        self.render_timeout_spin.setValue(300)
+        self.render_timeout_spin.setSuffix(" 秒")
+        render_options.addWidget(self.render_timeout_spin)
         output_button = QPushButton("打开输出目录")
         output_button.clicked.connect(self.open_output_directory)
         render_options.addWidget(output_button)
         render_options.addStretch()
         layout.addLayout(render_options)
+
+        self.render_progress = QProgressBar()
+        self.render_progress.setRange(0, 100)
+        self.render_progress.setValue(0)
+        self.render_progress.setFormat("等待渲染")
+        layout.addWidget(self.render_progress)
 
         splitter = QSplitter()
         self.source_edit = QPlainTextEdit()
@@ -335,6 +367,10 @@ class MainWindow(QMainWindow):
         if not scene_name:
             QMessageBox.warning(self, "没有场景", "代码中没有可运行的 Scene 子类")
             return
+        python_path = Path(self.python_edit.text().strip()).expanduser()
+        if not python_path.is_file():
+            QMessageBox.warning(self, "Python 解释器无效", f"文件不存在：{python_path}")
+            return
         try:
             self.generated_file.parent.mkdir(parents=True, exist_ok=True)
             self.generated_file.write_text(source + "\n", encoding="utf-8")
@@ -371,7 +407,7 @@ class MainWindow(QMainWindow):
             output_name,
         ]
         self.render_process.start(
-            sys.executable,
+            str(python_path.resolve()),
             [
                 "-m",
                 "manimlib",
@@ -381,6 +417,16 @@ class MainWindow(QMainWindow):
                 *output_args,
             ],
         )
+
+    def select_python_interpreter(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择 Python 解释器",
+            str(Path(self.python_edit.text()).parent),
+            "Python 解释器 (python.exe python);;所有文件 (*)",
+        )
+        if path:
+            self.python_edit.setText(path)
 
     def open_output_directory(self) -> None:
         output = self.project_root / "videos"
@@ -405,24 +451,52 @@ class MainWindow(QMainWindow):
             errors="replace",
         )
         if output:
+            self.render_output_buffer += output
             self.log_panel.write(output)
+            progress = parse_render_progress(output)
+            if progress is not None:
+                self.render_progress.setRange(0, 100)
+                self.render_progress.setValue(progress)
+                self.render_progress.setFormat(f"渲染进度 {progress}%")
 
     def _render_started(self) -> None:
         self.render_button.setEnabled(False)
         self.stop_button.setEnabled(True)
+        self.render_output_buffer = ""
+        self.render_timed_out = False
+        self.render_progress.setRange(0, 0)
+        self.render_progress.setFormat("正在渲染…")
+        self.render_timeout_timer.start(self.render_timeout_spin.value() * 1000)
         self.log_panel.write("渲染进程已启动")
 
     def _render_finished(self, exit_code: int, _exit_status) -> None:
+        self.render_timeout_timer.stop()
         self._read_render_output()
         self.render_button.setEnabled(True)
         self.stop_button.setEnabled(False)
         if exit_code == 0:
+            self.render_progress.setRange(0, 100)
+            self.render_progress.setValue(100)
+            self.render_progress.setFormat("渲染完成")
             self.log_panel.write("预览运行完成")
             self._load_rendered_preview()
         else:
             self.pending_preview_path = None
             self.log_panel.write(f"渲染进程退出，代码：{exit_code}")
+            diagnosis = classify_render_failure(self.render_output_buffer)
+            if diagnosis:
+                self.log_panel.write(f"[DIAGNOSIS] {diagnosis}")
+            self.render_progress.setRange(0, 100)
+            self.render_progress.setValue(0)
+            self.render_progress.setFormat("渲染超时" if self.render_timed_out else "渲染失败")
             self.preview_widget.show_message("渲染失败，请查看下方日志")
+
+    def _render_timeout(self) -> None:
+        if self.render_process.state() == QProcess.ProcessState.NotRunning:
+            return
+        self.render_timed_out = True
+        self.log_panel.write(f"[TIMEOUT] 渲染超过 {self.render_timeout_spin.value()} 秒，正在终止")
+        self.stop_render()
 
     def _load_rendered_preview(self) -> None:
         path = self.pending_preview_path
@@ -485,6 +559,8 @@ class MainWindow(QMainWindow):
         quality = str(self.settings.value("render_quality", "低清 480p"))
         scene_name = str(self.settings.value("scene_name", ""))
         generation_mode = str(self.settings.value("generation_mode", "自动生成"))
+        self.python_edit.setText(str(self.settings.value("python_interpreter", sys.executable)))
+        self.render_timeout_spin.setValue(int(self.settings.value("render_timeout", 300)))
         if self.mode_combo.findText(mode) >= 0:
             self.mode_combo.setCurrentText(mode)
         if self.quality_combo.findText(quality) >= 0:
@@ -504,6 +580,8 @@ class MainWindow(QMainWindow):
         self.settings.setValue("render_quality", self.quality_combo.currentText())
         self.settings.setValue("scene_name", self.scene_combo.currentText())
         self.settings.setValue("generation_mode", self.generation_mode_combo.currentText())
+        self.settings.setValue("python_interpreter", self.python_edit.text().strip())
+        self.settings.setValue("render_timeout", self.render_timeout_spin.value())
         self.settings.sync()
 
     def _update_title(self, modified: bool) -> None:

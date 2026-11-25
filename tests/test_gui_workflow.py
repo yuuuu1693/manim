@@ -83,6 +83,19 @@ class DemoScene(Scene):
             window.source_edit.document().setModified(False)
             window.close()
 
+    def test_render_settings_persist_interpreter_and_timeout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            settings = QSettings(str(Path(directory, "settings.ini")), QSettings.Format.IniFormat)
+            window = MainWindow(settings=settings)
+            window.python_edit.setText(os.sys.executable)
+            window.render_timeout_spin.setValue(45)
+            window._save_settings()
+            settings.sync()
+            self.assertEqual(settings.value("python_interpreter"), os.sys.executable)
+            self.assertEqual(int(settings.value("render_timeout")), 45)
+            window.source_edit.document().setModified(False)
+            window.close()
+
     def test_preview_widget_loads_rendered_image(self):
         from PySide6.QtGui import QColor, QImage
         from manimlib.gui.preview_widget import PreviewWidget
