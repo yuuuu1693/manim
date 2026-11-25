@@ -31,15 +31,11 @@ class AIPluginTests(unittest.TestCase):
             captured["authorization"] = request.headers["Authorization"]
             captured["payload"] = request.data.decode("utf-8")
             captured["timeout"] = timeout
-            source = """from manimlib import *
-
-class ModelScene(Scene):
-    def construct(self):
-        self.add(Circle())
-        self.wait(1)
-"""
             return json.dumps(
-                {"choices": [{"message": {"content": f"```python\n{source}```"}}]}
+                {"choices": [{"message": {"content": json.dumps({
+                    "objects": [{"name": "circle_1", "type": "circle"}],
+                    "actions": [{"type": "create", "target": "circle_1"}],
+                })}}]}
             ).encode("utf-8")
 
         provider = OpenAICompatibleProvider(
@@ -48,11 +44,37 @@ class ModelScene(Scene):
         )
         result = generate_scene_source("画一个圆", mode="provider", provider=provider)
         self.assertEqual(result.backend, "provider")
-        self.assertIn("class ModelScene(Scene)", result.source)
+        self.assertIn("circle_1 = Circle()", result.source)
         self.assertEqual(captured["url"], "https://example.test/v1/chat/completions")
         self.assertEqual(captured["authorization"], "Bearer secret")
         self.assertEqual(captured["timeout"], 3)
         self.assertIn('"model": "demo-model"', captured["payload"])
+        self.assertIn("objects", captured["payload"])
+        self.assertIn("actions", captured["payload"])
+
+    def test_scene_spec_rejects_unknown_references(self):
+        from manimlib.ai.models import SceneSpec
+
+        with self.assertRaisesRegex(ValueError, "Unknown action target"):
+            SceneSpec.from_dict({
+                "objects": [{"name": "circle_1", "type": "circle"}],
+                "actions": [{"type": "move", "target": "missing"}],
+            })
+
+    def test_provider_classifies_rate_limit_error(self):
+        from io import BytesIO
+        from urllib.error import HTTPError
+
+        def transport(request, timeout):
+            raise HTTPError(request.full_url, 429, "limited", {}, BytesIO())
+
+        provider = OpenAICompatibleProvider(
+            ProviderConfig("https://example.test/v1", "glm-5.3", "secret"),
+            transport=transport,
+        )
+        with self.assertRaisesRegex(ProviderError, "额度不足") as caught:
+            provider.generate_spec("画一个圆")
+        self.assertEqual(caught.exception.code, "rate_limit")
 
     def test_invalid_provider_code_falls_back_to_local_rules(self):
         class UnsafeProvider:

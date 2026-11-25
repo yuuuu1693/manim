@@ -35,7 +35,7 @@ class AISettingsDialog(QDialog):
 
         form = QFormLayout()
         self.base_url_edit = QLineEdit(
-            current.get("MANIM_AI_BASE_URL", "https://api.openai.com/v1")
+            current.get("MANIM_AI_BASE_URL", "https://api.lkeap.cloud.tencent.com/plan/v3")
         )
         self.model_edit = QLineEdit(current.get("MANIM_AI_MODEL", ""))
         self.api_key_edit = QLineEdit(current.get("MANIM_AI_API_KEY", ""))
@@ -46,6 +46,9 @@ class AISettingsDialog(QDialog):
         form.addRow("模型名称", self.model_edit)
         form.addRow("API 密钥", self.api_key_edit)
         form.addRow("超时（秒）", self.timeout_edit)
+        hint = QLabel("GLM 推荐：API 地址使用腾讯云 Token Plan 的 /plan/v3，模型填写 glm-5.3；开通后只需补充密钥。")
+        hint.setWordWrap(True)
+        form.addRow("配置提示", hint)
         layout.addLayout(form)
 
         buttons = QDialogButtonBox(

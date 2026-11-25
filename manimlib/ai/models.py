@@ -95,3 +95,36 @@ class SceneSpec:
                 for a in self.actions
             ],
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "SceneSpec":
+        """Build and validate a scene specification from untrusted JSON data."""
+        if not isinstance(data, dict):
+            raise ValueError("SceneSpec 必须是 JSON 对象")
+        raw_objects = data.get("objects", [])
+        raw_actions = data.get("actions", [])
+        if not isinstance(raw_objects, list) or not isinstance(raw_actions, list):
+            raise ValueError("objects 和 actions 必须是数组")
+        objects: list[SceneObject] = []
+        for item in raw_objects:
+            if not isinstance(item, dict):
+                raise ValueError("场景对象必须是 JSON 对象")
+            name = item.get("name")
+            object_type = item.get("type")
+            if not isinstance(name, str) or not isinstance(object_type, str):
+                raise ValueError("场景对象缺少字符串 name 或 type")
+            properties = {key: value for key, value in item.items() if key not in {"name", "type"}}
+            objects.append(SceneObject(name, object_type, properties))
+        actions: list[ActionSpec] = []
+        for item in raw_actions:
+            if not isinstance(item, dict):
+                raise ValueError("动作必须是 JSON 对象")
+            action_type = item.get("type")
+            target = item.get("target")
+            if not isinstance(action_type, str):
+                raise ValueError("动作缺少字符串 type")
+            if target is not None and not isinstance(target, str):
+                raise ValueError("动作 target 必须是字符串")
+            parameters = {key: value for key, value in item.items() if key not in {"type", "target"}}
+            actions.append(ActionSpec(action_type, target, parameters))
+        return cls(tuple(objects), tuple(actions))

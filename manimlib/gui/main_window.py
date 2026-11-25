@@ -176,7 +176,7 @@ class MainWindow(QMainWindow):
     def _provider_environ(self) -> dict[str, str]:
         values = {
             "MANIM_AI_BASE_URL": os.environ.get(
-                "MANIM_AI_BASE_URL", "https://api.openai.com/v1"
+                "MANIM_AI_BASE_URL", "https://api.lkeap.cloud.tencent.com/plan/v3"
             ),
             "MANIM_AI_MODEL": os.environ.get("MANIM_AI_MODEL", ""),
             "MANIM_AI_API_KEY": os.environ.get("MANIM_AI_API_KEY", ""),
@@ -456,7 +456,7 @@ class MainWindow(QMainWindow):
             "MANIM_AI_BASE_URL": str(
                 self.settings.value(
                     "ai/base_url",
-                    os.environ.get("MANIM_AI_BASE_URL", "https://api.openai.com/v1"),
+                    os.environ.get("MANIM_AI_BASE_URL", "https://api.lkeap.cloud.tencent.com/plan/v3"),
                 )
             ),
             "MANIM_AI_MODEL": str(

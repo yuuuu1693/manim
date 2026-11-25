@@ -10,6 +10,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from manimlib.ai.code_generator import generate_code
+from manimlib.ai.models import SceneSpec
 from manimlib.ai.prompt_parser import parse_prompt
 from manimlib.code_checker import check_code, detect_scene_names
 
@@ -20,6 +21,14 @@ SYSTEM_PROMPT = """你是 ManimGL 场景代码生成器。根据用户的中文�
 2. 代码必须能够直接运行，不要返回 Markdown、解释或省略号。
 3. 禁止文件、网络、系统命令、动态执行和用户输入操作。
 4. 动画结束时调用 self.wait，并优先使用 ManimGL 现有公开 API。
+"""
+
+SCENE_SPEC_SYSTEM_PROMPT = """你是 ManimGL 动画需求解析器。只返回一个 JSON 对象，不要返回 Markdown 或解释。
+JSON 顶层必须包含 objects 和 actions 两个数组。对象格式为 {"name":"circle_1","type":"circle",...属性}，
+动作格式为 {"type":"create","target":"circle_1",...参数}。
+对象 type 只能使用：annulus、arrow、axes、circle、dot、ellipse、function_graph、line、rectangle、square、text、triangle、group、irregular_triangle、pyramid。
+动作 type 只能使用：create、fade_in、fade_out、move、rotate、scale、set_color、wait。
+名称必须是合法且唯一的 Python 标识符；除 wait 外的动作必须引用已定义对象。不能输出 Python 代码。
 """
 
 FORBIDDEN_IMPORT_ROOTS = {
@@ -40,7 +49,9 @@ class SceneCodeProvider(Protocol):
 
 
 class ProviderError(RuntimeError):
-    pass
+    def __init__(self, message: str, code: str = "provider_error") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 @dataclass(frozen=True)
@@ -87,6 +98,20 @@ class OpenAICompatibleProvider:
         self.transport = transport or _default_transport
 
     def generate(self, prompt: str) -> str:
+        return self._request(prompt, SYSTEM_PROMPT)
+
+    def generate_spec(self, prompt: str) -> SceneSpec:
+        raw = self._request(prompt, SCENE_SPEC_SYSTEM_PROMPT)
+        try:
+            data = json.loads(_strip_json_fence(raw))
+            spec = SceneSpec.from_dict(data)
+        except (json.JSONDecodeError, ValueError, TypeError) as exc:
+            raise ProviderError(f"模型返回的 SceneSpec 无效：{exc}", "invalid_response") from exc
+        if not spec.objects:
+            raise ProviderError("模型返回的 SceneSpec 没有场景对象", "invalid_response")
+        return spec
+
+    def _request(self, prompt: str, system_prompt: str) -> str:
         prompt = prompt.strip()
         if not prompt:
             raise ProviderError("动画描述不能为空")
@@ -98,7 +123,7 @@ class OpenAICompatibleProvider:
                 "model": self.config.model,
                 "temperature": 0.2,
                 "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": prompt},
                 ],
             },
@@ -118,13 +143,23 @@ class OpenAICompatibleProvider:
             response = json.loads(raw.decode("utf-8"))
             content = response["choices"][0]["message"]["content"]
         except HTTPError as exc:
-            raise ProviderError(f"大模型接口返回 HTTP {exc.code}") from exc
-        except (URLError, TimeoutError, OSError) as exc:
-            raise ProviderError("大模型接口连接失败或超时") from exc
+            if exc.code in {401, 403}:
+                raise ProviderError("API 密钥无效、无权限或套餐未开通", "authentication") from exc
+            if exc.code == 429:
+                raise ProviderError("模型请求过于频繁或套餐额度不足", "rate_limit") from exc
+            if exc.code == 400:
+                raise ProviderError("接口地址、模型名称或请求参数不正确", "configuration") from exc
+            if exc.code >= 500:
+                raise ProviderError("模型服务暂时不可用，请稍后重试", "service_unavailable") from exc
+            raise ProviderError(f"大模型接口返回 HTTP {exc.code}", "http_error") from exc
+        except TimeoutError as exc:
+            raise ProviderError("大模型请求超时", "timeout") from exc
+        except (URLError, OSError) as exc:
+            raise ProviderError("无法连接大模型服务，请检查网络和 API 地址", "network") from exc
         except (UnicodeDecodeError, json.JSONDecodeError, KeyError, IndexError, TypeError) as exc:
-            raise ProviderError("大模型接口返回格式无效") from exc
+            raise ProviderError("大模型接口返回格式无效", "invalid_response") from exc
         if not isinstance(content, str) or not content.strip():
-            raise ProviderError("大模型接口没有返回代码")
+            raise ProviderError("大模型接口没有返回有效内容", "invalid_response")
         return content
 
 
@@ -160,7 +195,12 @@ def generate_scene_source(
         return GenerationResult(_generate_locally(prompt), "local")
 
     try:
-        source = _generate_validated_with_repair(active_provider, prompt)
+        generate_spec = getattr(active_provider, "generate_spec", None)
+        if callable(generate_spec):
+            source = generate_code(generate_spec(prompt))
+            source = validate_generated_source(source)
+        else:
+            source = _generate_validated_with_repair(active_provider, prompt)
         return GenerationResult(source, "provider")
     except (ProviderError, ValueError) as provider_error:
         if mode == "provider":
@@ -271,6 +311,15 @@ def _strip_code_fence(source: str) -> str:
         re.DOTALL | re.IGNORECASE,
     )
     return match.group("code") if match else source
+
+
+def _strip_json_fence(source: str) -> str:
+    match = re.fullmatch(
+        r"\s*```(?:json)?\s*\n(?P<data>.*?)\n```\s*",
+        source,
+        re.DOTALL | re.IGNORECASE,
+    )
+    return match.group("data") if match else source.strip()
 
 
 def _default_transport(request: Request, timeout: float) -> bytes:

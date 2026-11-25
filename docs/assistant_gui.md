@@ -20,8 +20,8 @@ To enable any OpenAI-compatible chat-completions endpoint, set environment
 variables before launching the GUI (never commit API keys to the repository):
 
     $env:MANIM_AI_API_KEY="your-api-key"
-    $env:MANIM_AI_MODEL="your-model-name"
-    $env:MANIM_AI_BASE_URL="https://provider.example/v1"
+    $env:MANIM_AI_MODEL="glm-5.3"
+    $env:MANIM_AI_BASE_URL="https://api.lkeap.cloud.tencent.com/plan/v3"
     $env:MANIM_AI_TIMEOUT="20"
 
 Alternatively, click **AI 配置** in the application. The API address, model,
@@ -34,6 +34,12 @@ Scene, static-error, import, and dangerous-call validation. In automatic mode,
 invalid model code is returned to the provider once with the validation error for
 automatic repair. If the repair still fails, automatic mode falls back to local
 rules and shows the reason in the log.
+
+The provider requests a strict JSON `SceneSpec` by default. The response is
+validated against supported object/action types and references, then converted
+to Python by local deterministic templates. Authentication, quota/rate-limit,
+timeout, network, configuration, server, and invalid-response failures are
+reported separately. Local-rule mode does not require an API key.
 
 ## Start the application
 
