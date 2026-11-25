@@ -8,6 +8,7 @@ from manimlib.ai.models import SceneObject
 
 
 OBJECT_CONSTRUCTORS = {
+    "annulus": "Annulus(inner_radius=0.8, outer_radius=1.5)",
     "arrow": "Arrow(LEFT, RIGHT)",
     "circle": "Circle()",
     "dot": "Dot()",
@@ -21,7 +22,12 @@ ALLOWED_DIRECTIONS = {"RIGHT", "LEFT", "UP", "DOWN", "UR", "UL", "DR", "DL"}
 
 
 def render_object(obj: SceneObject) -> str:
-    if obj.type == "axes":
+    if obj.type == "group":
+        members = obj.properties.get("members")
+        if not isinstance(members, (list, tuple)):
+            raise ValueError("Group objects require members")
+        constructor = f"VGroup({', '.join(_identifier(item, 'member') for item in members)})"
+    elif obj.type == "axes":
         constructor = "Axes(x_range=(-5, 5, 1), y_range=(-3, 3, 1))"
     elif obj.type == "function_graph":
         axes = _identifier(obj.properties.get("axes"), "axes")
@@ -46,6 +52,35 @@ def render_object(obj: SceneObject) -> str:
     if position is not None:
         expression += f".move_to({_constant(position, 'position')})"
     return f"        {obj.name} = {expression}"
+
+
+def render_layout(obj: SceneObject) -> list[str]:
+    """Render layout statements that require already-created peer objects."""
+    lines: list[str] = []
+    if reference := obj.properties.get("inscribed_in"):
+        target = _identifier(reference, "inscribed_in")
+        if obj.type == "square":
+            lines.append(
+                f"        {obj.name}.set_width({target}.get_width() / np.sqrt(2)).move_to({target})"
+            )
+        else:
+            lines.append(f"        {obj.name}.move_to({target})")
+    if reference := obj.properties.get("centered_in"):
+        target = _identifier(reference, "centered_in")
+        lines.append(f"        {obj.name}.move_to({target})")
+    if reference := obj.properties.get("tangent_to"):
+        target = _identifier(reference, "tangent_to")
+        lines.append(f"        {obj.name}.next_to({target}, RIGHT, buff=0)")
+    if reference := obj.properties.get("overlap_with"):
+        target = _identifier(reference, "overlap_with")
+        ratio = float(obj.properties.get("overlap_ratio", 0.5))
+        if not 0 < ratio < 1:
+            raise ValueError("overlap_ratio must be between 0 and 1")
+        lines.append(
+            f"        {obj.name}.next_to({target}, RIGHT, "
+            f"buff=-min({target}.get_width(), {obj.name}.get_width()) * {ratio:g})"
+        )
+    return lines
 
 
 def render_action(action_type: str, target: str | None, parameters: dict[str, object]) -> str:

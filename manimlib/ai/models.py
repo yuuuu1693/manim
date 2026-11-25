@@ -5,6 +5,7 @@ from typing import Any
 
 
 SUPPORTED_OBJECTS = {
+    "annulus",
     "arrow",
     "axes",
     "circle",
@@ -16,6 +17,7 @@ SUPPORTED_OBJECTS = {
     "square",
     "text",
     "triangle",
+    "group",
 }
 SUPPORTED_ACTIONS = {
     "create",
@@ -69,6 +71,16 @@ class SceneSpec:
             axes_name = obj.properties.get("axes")
             if axes_name is not None and axes_name not in known:
                 raise ValueError(f"Unknown axes reference: {axes_name!r}")
+            for key in ("inscribed_in", "centered_in", "tangent_to", "overlap_with"):
+                reference = obj.properties.get(key)
+                if reference is not None and reference not in known:
+                    raise ValueError(f"Unknown {key} reference: {reference!r}")
+            members = obj.properties.get("members")
+            if members is not None:
+                if not isinstance(members, (list, tuple)) or len(members) < 2:
+                    raise ValueError("Group objects require at least two members")
+                if any(member not in known or member == obj.name for member in members):
+                    raise ValueError(f"Invalid group members: {members!r}")
         for action in self.actions:
             if action.target is not None and action.target not in known:
                 raise ValueError(f"Unknown action target: {action.target!r}")

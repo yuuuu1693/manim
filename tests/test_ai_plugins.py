@@ -147,6 +147,49 @@ class UnsafeScene(Scene):
         self.assertIn("triangle_1 = Triangle()", source)
         self.assertIn("triangle_1.animate.shift(UP)", source)
 
+    def test_square_can_be_inscribed_in_circle(self):
+        source = generate_code(parse_prompt("创建一个圆和一个正方形，让正方形内接圆"))
+        self.assertIn(
+            "square_1.set_width(circle_1.get_width() / np.sqrt(2)).move_to(circle_1)",
+            source,
+        )
+        self.assertEqual(check_code(source), [])
+
+    def test_shapes_can_overlap_by_percentage(self):
+        source = generate_code(parse_prompt("创建一个圆和一个正方形，让两个图形按50%重叠"))
+        self.assertIn(
+            "buff=-min(circle_1.get_width(), square_1.get_width()) * 0.5",
+            source,
+        )
+        reversed_source = generate_code(
+            parse_prompt("创建一个圆和一个正方形，让两个图形重叠30%")
+        )
+        self.assertIn("* 0.3", reversed_source)
+
+    def test_shapes_can_be_automatically_tangent(self):
+        source = generate_code(parse_prompt("创建一个圆和一个正方形，让两个图形相切"))
+        self.assertIn("square_1.next_to(circle_1, RIGHT, buff=0)", source)
+
+    def test_shape_can_be_centered_in_annulus(self):
+        source = generate_code(parse_prompt("创建一个蓝色圆环和一个红色三角形，让三角形在圆环中心"))
+        self.assertIn("annulus_1 = Annulus(inner_radius=0.8, outer_radius=1.5)", source)
+        self.assertIn("triangle_1.move_to(annulus_1)", source)
+        combined = generate_code(
+            parse_prompt("创建一个圆环和一个正方形，让它们自动居中组合")
+        )
+        self.assertIn("square_1.move_to(annulus_1)", combined)
+        self.assertIn("group_1 = VGroup(annulus_1, square_1)", combined)
+
+    def test_group_moves_and_scales_as_one_object(self):
+        source = generate_code(
+            parse_prompt(
+                "创建一个圆和一个正方形，将两个图形作为一个整体向右移动2个单位并缩放2倍"
+            )
+        )
+        self.assertIn("group_1 = VGroup(circle_1, square_1)", source)
+        self.assertIn("group_1.animate.shift(RIGHT * 2)", source)
+        self.assertIn("group_1.animate.scale(2)", source)
+
     def test_empty_and_unsupported_prompts_are_rejected(self):
         with self.assertRaisesRegex(ValueError, "不能为空"):
             parse_prompt("   ")

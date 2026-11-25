@@ -3,7 +3,7 @@ from __future__ import annotations
 import ast
 
 from manimlib.ai.models import ActionSpec, SceneObject, SceneSpec
-from manimlib.ai.template_manager import render_action, render_object
+from manimlib.ai.template_manager import render_action, render_layout, render_object
 
 
 def generate_code(spec: SceneSpec | dict[str, object], class_name: str = "GeneratedScene") -> str:
@@ -22,6 +22,10 @@ def generate_code(spec: SceneSpec | dict[str, object], class_name: str = "Genera
         "    def construct(self):",
     ]
     lines.extend(render_object(obj) for obj in spec.objects)
+    layout_lines = [line for obj in spec.objects for line in render_layout(obj)]
+    if layout_lines:
+        lines.append("")
+        lines.extend(layout_lines)
     if spec.objects and spec.actions:
         lines.append("")
     lines.extend(render_action(a.type, a.target, a.parameters) for a in spec.actions)

@@ -47,9 +47,22 @@ Example prompts:
     创建一个蓝色圆点，让圆点向右上移动2个单位持续3秒然后淡出
 
 Offline templates support circles, squares, triangles, rectangles, ellipses,
-dots, lines, arrows, text, axes, and function graphs. Supported actions include
+dots, lines, arrows, annuli, text, axes, and function graphs. Supported actions include
 creation, fade-in/out, movement in eight directions, rotation, scaling, color
 changes, and timed waits.
+
+Deterministic composition rules also support a square inscribed in a circle,
+percentage-based overlap, automatic tangency, centering a shape inside an
+annulus, and grouping multiple shapes so that movement and scaling apply to the
+whole composition.
+
+Example composition prompts:
+
+    创建一个圆和一个正方形，让正方形内接圆
+    创建一个圆和一个正方形，让两个图形按50%重叠
+    创建一个圆和一个正方形，让两个图形相切
+    创建一个圆环和一个正方形，让它们自动居中组合
+    创建一个圆和一个正方形，将两个图形作为一个整体向右移动2个单位并缩放2倍
 
 The application can generate and check source code, recognize basic geometric
 images, open or export Python scenes, select a Scene subclass, preview the
